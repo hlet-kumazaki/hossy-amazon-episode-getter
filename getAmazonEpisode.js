@@ -1,4 +1,3 @@
-const fs = require('fs');
 const puppeteer = require('puppeteer');
 
 (async () => {
@@ -10,17 +9,21 @@ const puppeteer = require('puppeteer');
   const page = await browser.newPage();
   const url = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931';
 
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await new Promise(resolve => setTimeout(resolve, 8000));
+  await page.goto(url, { waitUntil: 'networkidle2' });
 
-  const html = await page.content();
-  const found = html.includes('music-episode-row-item');
+  // music-episode-row-item が現れるまで最大10秒待つ
+  await page.waitForSelector('music-episode-row-item a[href*="/episodes/"]', { timeout: 10000 });
 
-  console.log('music-episode-row-item 存在:', found ? '✅ あり' : '❌ なし');
+  const episodeUrl = await page.evaluate(() => {
+    const el = document.querySelector('music-episode-row-item a[href*="/episodes/"]');
+    return el ? el.href : null;
+  });
 
-  // HTMLをファイルに保存
-  fs.writeFileSync('page_dump.html', html);
-  console.log('✅ 全HTMLを page_dump.html に保存しました');
+  if (episodeUrl) {
+    console.log('✅ 最新エピソードURL:', episodeUrl);
+  } else {
+    console.error('❌ URLが見つかりませんでした');
+  }
 
   await browser.close();
 })();
