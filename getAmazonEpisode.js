@@ -11,37 +11,28 @@ const puppeteer = require('puppeteer');
   const url = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931';
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-  // JS描画待ち
-  await new Promise(resolve => setTimeout(resolve, 8000));
+  // JS描画を待つ
+  await page.waitForTimeout(8000);
 
-  // Shadow DOMを掘る
-  const episodeUrl = await page.evaluate(async () => {
-    const item = document.querySelector('music-episode-row-item');
-    if (!item) return null;
+  try {
+    // カスタム要素をハンドルとして取得
+    const episodeHandle = await page.$('music-episode-row-item');
+    if (!episodeHandle) throw new Error('music-episode-row-item が見つかりません');
 
-    const getShadowLink = async (elem) => {
-      return new Promise(resolve => {
-        const interval = setInterval(() => {
-          const shadow = elem.shadowRoot;
-          if (shadow) {
-            const aTag = shadow.querySelector('a[href*="/episodes/"]');
-            if (aTag) {
-              clearInterval(interval);
-              resolve(aTag.href);
-            }
-          }
-        }, 200);
-        setTimeout(() => clearInterval(interval), 5000); // timeout fallback
-      });
-    };
+    // Shadow Rootを取得
+    const shadowRootHandle = await episodeHandle.evaluateHandle(el => el.shadowRoot);
+    if (!shadowRootHandle) throw new Error('shadowRoot が null');
 
-    return await getShadowLink(item);
-  });
+    // Shadow DOM内部の <a> タグ取得
+    const linkHandle = await shadowRootHandle.$('a[href*="/episodes/"]');
+    if (!linkHandle) throw new Error('リンク要素が shadowRoot 内に見つかりません');
 
-  if (episodeUrl) {
+    // href属性を取得
+    const episodeUrl = await linkHandle.evaluate(el => el.href);
     console.log('✅ Shadow DOM内のエピソードURL:', episodeUrl);
-  } else {
-    console.error('❌ Shadow DOMからもURL取得に失敗しました');
+
+  } catch (err) {
+    console.error('❌ 取得失敗:', err.message);
   }
 
   await browser.close();
