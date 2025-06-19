@@ -9,10 +9,13 @@ const puppeteer = require('puppeteer');
   const page = await browser.newPage();
 
   const url = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931';
-  await page.goto(url, { waitUntil: 'networkidle2' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' }); // networkidle2 を弱めに変更
 
-  // 🔽 明示的に待機してからエピソードリンク取得
+  // ⏳ 明示的に待つ（3秒）→ Amazon側のJS描画を待つため
+  await page.waitForTimeout(3000);
+
   const selector = 'a[href^="/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931/episodes/"]';
+
   try {
     await page.waitForSelector(selector, { timeout: 10000 });
 
