@@ -11,28 +11,14 @@ const puppeteer = require('puppeteer');
   const url = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931';
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-  // 🕒 明示的に3秒待機（waitForTimeout代用）
+  // 3秒待機
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  const selector = 'a[href^="/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931/episodes/"]';
-
-  try {
-    await page.waitForSelector(selector, { timeout: 10000 });
-
-    const episodeUrl = await page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      return el ? el.href : null;
-    }, selector);
-
-    if (episodeUrl) {
-      console.log('✅ 最新エピソードURL:', episodeUrl);
-    } else {
-      console.error('❌ URL取得失敗');
-    }
-
-  } catch (e) {
-    console.error('❌ 要素が表示されませんでした:', e.message);
-  }
+  // ページのHTMLを取得してログ出力（長すぎるので最初の1000文字だけ）
+  const html = await page.content();
+  console.log('----- HTML snapshot -----');
+  console.log(html.slice(0, 1000)); // 長すぎるとGitHub Actionsログに載らないので一部だけ
+  console.log('-------------------------');
 
   await browser.close();
 })();
