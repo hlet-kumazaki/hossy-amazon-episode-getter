@@ -1,9 +1,9 @@
 name: Scrape Amazon Podcast
 
 on:
-  workflow_dispatch: # 手動実行
+  workflow_dispatch:
   schedule:
-    - cron: '10 22 * * 4' # 毎週金曜7:10 JST（＝木曜22:10 UTC）
+    - cron: '10 22 * * 4'
 
 jobs:
   scrape:
@@ -23,3 +23,9 @@ jobs:
 
       - name: Run scraper
         run: npm start
+
+      - name: Upload HTML dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: page_dump
+          path: page_dump.html
