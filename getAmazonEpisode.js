@@ -7,12 +7,13 @@ const puppeteer = require('puppeteer');
   });
 
   const page = await browser.newPage();
-
   const url = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931';
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-  // 🔧 waitForTimeout の代用
-  await new Promise(resolve => setTimeout(resolve, 8000));
+  // ✅ music-episode-row-item が出るまで最大15秒待つ
+  await page.waitForFunction(() => {
+    return document.querySelector('music-episode-row-item') !== null;
+  }, { timeout: 15000 });
 
   try {
     const episodeHandle = await page.$('music-episode-row-item');
