@@ -1,9 +1,9 @@
 {
-  "name": "amz-first-card-url",
+  "name": "amz-first-card-info",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node amz_first_card_url.js",
+    "start": "node amz_first_card_info.js",
     "pw:install": "npx playwright install --with-deps"
   },
   "devDependencies": {
