@@ -30,10 +30,10 @@ jobs:
         id: runit
         env:
           CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
-          WP_USER: ${{ secrets.WP_USER }}          # 例: gpt-agent@hossy.org
-          WP_PASS: ${{ secrets.WP_PASS }}          # 例: ViexBjNUZe9Kty3n00fjNv4t
-          FIELD_KEY: ${{ vars.FIELD_KEY }}         # 既定: field_680d867a57991（未設定ならスクリプト既定が適用）
-          ENDPOINTS: ${{ vars.ENDPOINTS }}         # 例: https://hossy.org/wp-json/agent/v1/meta,https://hossy.org/wp-json/agent/v1/meta/
+          WP_USER: ${{ secrets.WP_USER }}          
+          WP_PASS: ${{ secrets.WP_PASS }}          
+          FIELD_KEY: ${{ vars.FIELD_KEY }}         
+          ENDPOINTS: ${{ vars.ENDPOINTS }}         
         run: |
           : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
           if [ -z "$CHANNEL_URL" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
