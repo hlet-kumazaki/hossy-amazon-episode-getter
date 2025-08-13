@@ -1,31 +1,58 @@
-name: Scrape Amazon Podcast
+name: AmazonMusic First Card URL
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '10 22 * * 4'
+    # 例: 毎日 JST 14:15 に実行（JST=UTC+9 → UTC 05:15）
+    - cron: "15 5 * * *"
+  workflow_dispatch:
+    inputs:
+      channel_url:
+        description: "Amazon Music channel URL (override)"
+        required: false
+        type: string
 
 jobs:
-  scrape:
+  run:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install deps
+        run: |
+          npm ci || npm i
+          npm run pw:install
 
-      - name: Run scraper
-        run: npm start
+      - name: Get Episode URL
+        id: geturl
+        env:
+          # 既定はリポジトリ変数または下のデフォルト値を使用
+          CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
+        run: |
+          : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
+          if [ -z "$CHANNEL_URL" ]; then
+            echo "CHANNEL_URL not provided"; exit 1
+          fi
+          URL=$(CHANNEL_URL="$CHANNEL_URL" node amz_first_card_url.js)
+          echo "episode_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "$URL" > episode_url.txt
 
-      - name: Upload HTML dump
+      - name: Summarize
+        run: |
+          echo "### Episode URL" >> $GITHUB_STEP_SUMMARY
+          echo "\n\`\`\`\n${{ steps.geturl.outputs.episode_url }}\n\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: page_dump
-          path: page_dump.html
+          name: episode-url
+          path: episode_url.txt
+
+    # 同時実行制御（最新のみ動かす）
+    concurrency:
+      group: amazon-music-url
+      cancel-in-progress: true
