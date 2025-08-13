@@ -1,46 +1,36 @@
-name: AmazonMusic First Card URL
+name: AmazonMusic URL Debug
 
 on:
-  schedule:
-    # 例: 毎日 JST 14:15 に実行（JST=UTC+9 → UTC 05:15）
-    - cron: "15 5 * * *"
   workflow_dispatch:
     inputs:
       channel_url:
         description: "Amazon Music channel URL (override)"
         required: false
         type: string
+  # ※定刻実行したい場合はコメント解除してUTCで書く（JST=UTC+9）
+  #schedule:
+  #  - cron: "15 5 * * *" # JST 14:15
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install deps
         run: |
           npm ci || npm i
-          npm run pw:install
+          # Playwright を使うなら依存も入れる（エラーなく通すため with-deps）
+          npx playwright install --with-deps || true
 
-      - name: Get Episode URL
-        id: geturl
-        env:
-          # 既定はリポジトリ変数または下のデフォルト値を使用
-          CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
-        run: |
-          : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
-          if [ -z "$CHANNEL_URL" ]; then
-            echo "CHANNEL_URL not provided"; exit 1
-          fi
-          URL=$(CHANNEL_URL="$CHANNEL_URL" node amz_first_card_url.js)
-          echo "episode_url=$URL" >> "$GITHUB_OUTPUT"
-          echo "$URL" > episode_url.txt
-        
+      # ── ① curl で一次診断（ヘッダ/最終URL/ボディ先頭）──
       - name: Probe with curl (headers & final URL)
         id: curlprobe
         env:
@@ -50,27 +40,114 @@ jobs:
           if [ -z "$CHANNEL_URL" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
 
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-          # レスポンスヘッダ
           curl -I -A "$UA" -H "Accept-Language: ja,en;q=0.8" -sS "$CHANNEL_URL" | tee curl_headers.txt
-
-          # リダイレクトを追って最終URL/コード
           curl -Ls -o /dev/null -w "final_url=%{url_effective}\nstatus=%{http_code}\n" -A "$UA" -H "Accept-Language: ja,en;q=0.8" "$CHANNEL_URL" | tee curl_final.txt
-
-          # ボディ先頭だけ（サインイン/アクセス拒否の文言を掴む）
           curl -Ls -A "$UA" -H "Accept-Language: ja,en;q=0.8" "$CHANNEL_URL" | head -c 5000 > curl_body_snippet.txt || true
 
-      - name: Summarize
+      - name: Upload curl artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: curl-probe
+          path: |
+            curl_headers.txt
+            curl_final.txt
+            curl_body_snippet.txt
+
+      # ── ② Playwright でアクセスし、抽出失敗時は証拠を保存（HTML/PNG/タイトル等）──
+      - name: Prepare script (amz_first_card_url.js with debug)
+        run: |
+          cat > amz_first_card_url.js <<'JS'
+          import { chromium } from "playwright";
+          import fs from "node:fs/promises";
+
+          const CHANNEL_URL = process.env.CHANNEL_URL;
+          const DEBUG = process.env.DEBUG === "1";
+          const outError = (msg) => console.log(JSON.stringify({ error: msg }));
+
+          if (!CHANNEL_URL) {
+            console.log(JSON.stringify({ error: "CHANNEL_URL missing" }));
+            process.exit(0);
+          }
+
+          (async () => {
+            let browser;
+            try {
+              browser = await chromium.launch({ headless: true });
+              const context = await browser.newContext({
+                locale: "ja-JP",
+                timezoneId: "Asia/Tokyo",
+                userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+              });
+              const page = await context.newPage();
+
+              const res = await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
+              await page.waitForLoadState("networkidle", { timeout: 60000 });
+
+              const card = page.locator('[data-testid="music-episode-row-item"], .music-episode-row-item').first();
+              let episodeUrl = null;
+
+              if (await card.count()) {
+                const link = card.locator('a[href*="/episodes/"]').first();
+                if (await link.count()) episodeUrl = await link.getAttribute("href");
+                else episodeUrl = await card.getAttribute("primary-href");
+              }
+              if (!episodeUrl) {
+                const section = page.locator('section:has-text("おすすめ"), section:has-text("始める")').first();
+                if (await section.count()) {
+                  const link = section.locator('a[href*="/episodes/"]').first();
+                  if (await link.count()) episodeUrl = await link.getAttribute("href");
+                }
+              }
+              if (episodeUrl && episodeUrl.startsWith("/")) {
+                const { origin } = new URL(CHANNEL_URL);
+                episodeUrl = origin + episodeUrl;
+              }
+
+              if (!episodeUrl) {
+                if (DEBUG) {
+                  await fs.writeFile("pw_status.txt", `http_status=${res?.status?.()}\nfinal_url=${page.url()}\ntitle=${await page.title()}\n`);
+                  await fs.writeFile("page.html", await page.content());
+                  await page.screenshot({ path: "page.png", fullPage: true });
+                }
+                return outError("Amazon Music page could not be loaded");
+              }
+
+              process.stdout.write(episodeUrl + "\n");
+            } catch {
+              return outError("Amazon Music page could not be loaded");
+            } finally {
+              if (browser) await browser.close();
+            }
+          })();
+          JS
+
+      - name: Get Episode URL (Playwright)
+        id: geturl
+        env:
+          CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
+          DEBUG: "1"
+        run: |
+          : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
+          URL=$(CHANNEL_URL="$CHANNEL_URL" node amz_first_card_url.js || true)
+          echo "episode_url=$URL" >> "$GITHUB_OUTPUT"
+          printf "%s\n" "$URL" > episode_url.txt
+
+      - name: Upload Playwright debug (if any)
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-debug
+          path: |
+            pw_status.txt
+            page.html
+            page.png
+          if-no-files-found: ignore
+
+      - name: Summary
         run: |
           echo "### Episode URL" >> $GITHUB_STEP_SUMMARY
           echo "\n\`\`\`\n${{ steps.geturl.outputs.episode_url }}\n\`\`\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: episode-url
-          path: episode_url.txt
-
-    # 同時実行制御（最新のみ動かす）
+    # 並走制御（必要なら外してOK）
     concurrency:
-      group: amazon-music-url
+      group: amazon-music-url-debug
       cancel-in-progress: true
