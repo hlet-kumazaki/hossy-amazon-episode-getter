@@ -1,9 +1,9 @@
 {
-  "name": "amz-first-card-info",
+  "name": "amz-first-card-wp-update",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node amz_first_card_info.js",
+    "start": "node amz_first_card_and_update_wp.js",
     "pw:install": "npx playwright install --with-deps"
   },
   "devDependencies": {

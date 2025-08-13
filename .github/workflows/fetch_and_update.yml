@@ -1,0 +1,66 @@
+name: Fetch & Update (AmazonMusic -> WP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_url:
+        description: "Amazon Music channel URL (override)"
+        required: false
+        type: string
+  # ↓スケジュールしたい場合はコメント解除（JST=UTC+9）
+  #schedule:
+  #  - cron: "15 5 * * *" # JST 14:15
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: |
+          npm ci || npm i
+          npx playwright install --with-deps
+
+      - name: Fetch URL & Update WP
+        id: runit
+        env:
+          CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
+          WP_USER: ${{ secrets.WP_USER }}          # 例: gpt-agent@hossy.org
+          WP_PASS: ${{ secrets.WP_PASS }}          # 例: ViexBjNUZe9Kty3n00fjNv4t
+          FIELD_KEY: ${{ vars.FIELD_KEY }}         # 既定: field_680d867a57991（未設定ならスクリプト既定が適用）
+          ENDPOINTS: ${{ vars.ENDPOINTS }}         # 例: https://hossy.org/wp-json/agent/v1/meta,https://hossy.org/wp-json/agent/v1/meta/
+        run: |
+          : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
+          if [ -z "$CHANNEL_URL" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
+
+          node -e 'console.log("Preparing script...")'
+          # スクリプトがリポジトリにある前提。ファイル名は上の JS と一致させてください
+          OUT=$(node amz_first_card_and_update_wp.js)
+          echo "$OUT" | tee result.json
+
+          # GITHUB_OUTPUT（サマリ用）
+          echo "json=$OUT" >> "$GITHUB_OUTPUT"
+          # episode_url だけも使えるようについでに出力
+          EP=$(node -e 'const o=JSON.parse(process.argv[1]); console.log(o.episode_url||"")' "$OUT")
+          echo "episode_url=$EP" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          echo "### Result JSON" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.runit.outputs.json }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result
+          path: result.json
+
+    concurrency:
+      group: amz-wp-update
+      cancel-in-progress: true
