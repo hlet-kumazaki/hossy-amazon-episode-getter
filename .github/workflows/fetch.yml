@@ -40,6 +40,24 @@ jobs:
           URL=$(CHANNEL_URL="$CHANNEL_URL" node amz_first_card_url.js)
           echo "episode_url=$URL" >> "$GITHUB_OUTPUT"
           echo "$URL" > episode_url.txt
+        
+      - name: Probe with curl (headers & final URL)
+        id: curlprobe
+        env:
+          CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
+        run: |
+          : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
+          if [ -z "$CHANNEL_URL" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
+
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+          # レスポンスヘッダ
+          curl -I -A "$UA" -H "Accept-Language: ja,en;q=0.8" -sS "$CHANNEL_URL" | tee curl_headers.txt
+
+          # リダイレクトを追って最終URL/コード
+          curl -Ls -o /dev/null -w "final_url=%{url_effective}\nstatus=%{http_code}\n" -A "$UA" -H "Accept-Language: ja,en;q=0.8" "$CHANNEL_URL" | tee curl_final.txt
+
+          # ボディ先頭だけ（サインイン/アクセス拒否の文言を掴む）
+          curl -Ls -A "$UA" -H "Accept-Language: ja,en;q=0.8" "$CHANNEL_URL" | head -c 5000 > curl_body_snippet.txt || true
 
       - name: Summarize
         run: |
