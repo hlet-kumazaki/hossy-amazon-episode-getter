@@ -6,8 +6,6 @@ if (!CHANNEL_URL) {
   process.exit(0);
 }
 
-const out = (obj) => console.log(JSON.stringify(obj));
-
 (async () => {
   let browser;
   try {
@@ -20,31 +18,25 @@ const out = (obj) => console.log(JSON.stringify(obj));
     });
     const page = await context.newPage();
 
-    const res = await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
+    await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
     await page.waitForLoadState("networkidle", { timeout: 60000 });
 
-    // 最初の横長カード = music-episode-row-item の先頭
+    // 最初の横長カード
     const item = page.locator("music-episode-row-item").first();
     if (!(await item.count())) {
-      return out({ error: "Amazon Music page could not be loaded" });
+      console.log(JSON.stringify({ error: "Amazon Music page could not be loaded" }));
+      return;
     }
 
-    // 1) まず属性から読む（推奨）
+    // primary-href属性を優先
     let href = await item.getAttribute("primary-href");
-    let title = await item.getAttribute("primary-text");
-
-    // 2) フォールバック：内部の a[href*="/episodes/"] から取得
     if (!href) {
       const link = item.locator('a[href*="/episodes/"]').first();
       if (await link.count()) href = await link.getAttribute("href");
     }
-    if (!title) {
-      const t = await item.textContent();
-      title = (t || "").trim() || null;
-    }
-
     if (!href) {
-      return out({ error: "Amazon Music page could not be loaded" });
+      console.log(JSON.stringify({ error: "Amazon Music page could not be loaded" }));
+      return;
     }
 
     // 絶対URL化
@@ -53,9 +45,10 @@ const out = (obj) => console.log(JSON.stringify(obj));
       href = origin + href;
     }
 
-    out({ episode_url: href, title });
+    // URLだけ出力
+    process.stdout.write(href + "\n");
   } catch {
-    out({ error: "Amazon Music page could not be loaded" });
+    console.log(JSON.stringify({ error: "Amazon Music page could not be loaded" }));
   } finally {
     if (browser) await browser.close();
   }

@@ -20,29 +20,22 @@ jobs:
           npm ci || npm i
           npm run pw:install
 
-      - name: Get first card info (URL & Title)
+      - name: Get first card URL only
         id: first
         env:
           CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
         run: |
           : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
-          INFO=$(CHANNEL_URL="$CHANNEL_URL" node amz_first_card_info.js)
-          echo "$INFO" | tee first_card.json
-          # jq が無い環境でも簡易抽出（行末の " を削る程度）
-          EP_URL=$(node -e "console.log(JSON.parse(process.argv[1]).episode_url||'')" "$INFO")
-          TITLE=$(node -e "console.log(JSON.parse(process.argv[1]).title||'')" "$INFO")
-          echo "episode_url=$EP_URL" >> "$GITHUB_OUTPUT"
-          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          URL=$(CHANNEL_URL="$CHANNEL_URL" node amz_first_card_url.js)
+          echo "$URL" | tee episode_url.txt
+          echo "episode_url=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         run: |
-          echo "### First card (URL & Title)" >> $GITHUB_STEP_SUMMARY
-          echo "\n**URL**" >> $GITHUB_STEP_SUMMARY
+          echo "### First card URL" >> $GITHUB_STEP_SUMMARY
           echo "\n\`\`\`\n${{ steps.first.outputs.episode_url }}\n\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "\n**Title**" >> $GITHUB_STEP_SUMMARY
-          echo "\n\`\`\`\n${{ steps.first.outputs.title }}\n\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: first-card
-          path: first_card.json
+          name: episode-url
+          path: episode_url.txt
