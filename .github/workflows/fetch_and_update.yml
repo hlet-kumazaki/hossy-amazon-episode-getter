@@ -7,9 +7,11 @@ on:
         description: "Amazon Music channel URL (override)"
         required: false
         type: string
-        schedule:
-          #- cron: "30 21 * * 4"   # 毎週木曜 21:30 UTC = 毎週金曜 06:30 JST
-          - cron: "*/5 * * * *"
+  schedule:
+    # 毎週金曜 06:30 JST（= 木曜 21:30 UTC）
+    # - cron: "30 21 * * 4"
+    # 動作確認用：5分おき
+    - cron: "*/5 * * * *"
 
 jobs:
   run:
@@ -30,22 +32,16 @@ jobs:
         id: runit
         env:
           CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
-          WP_USER: ${{ secrets.WP_USER }}          
-          WP_PASS: ${{ secrets.WP_PASS }}          
-          FIELD_KEY: ${{ vars.FIELD_KEY }}         
-          ENDPOINTS: ${{ vars.ENDPOINTS }}         
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_PASS: ${{ secrets.WP_PASS }}
+          FIELD_KEY: ${{ vars.FIELD_KEY }}
+          ENDPOINTS: ${{ vars.ENDPOINTS }}
         run: |
           : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
           if [ -z "$CHANNEL_URL" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
-
-          node -e 'console.log("Preparing script...")'
-          # スクリプトがリポジトリにある前提。ファイル名は上の JS と一致させてください
           OUT=$(node amz_first_card_and_update_wp.js)
           echo "$OUT" | tee result.json
-
-          # GITHUB_OUTPUT（サマリ用）
           echo "json=$OUT" >> "$GITHUB_OUTPUT"
-          # episode_url だけも使えるようについでに出力
           EP=$(node -e 'const o=JSON.parse(process.argv[1]); console.log(o.episode_url||"")' "$OUT")
           echo "episode_url=$EP" >> "$GITHUB_OUTPUT"
 
