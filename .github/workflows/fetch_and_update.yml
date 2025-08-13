@@ -8,7 +8,8 @@ on:
         required: false
         type: string
         schedule:
-          - cron: "30 21 * * 4"   # 毎週木曜 21:30 UTC = 毎週金曜 06:30 JST
+          #- cron: "30 21 * * 4"   # 毎週木曜 21:30 UTC = 毎週金曜 06:30 JST
+          - cron: "*/5 * * * *"
 
 jobs:
   run:
