@@ -9,8 +9,7 @@ on:
         type: string
   schedule:
     # 毎週金曜 06:30 JST（= 木曜 21:30 UTC）
-    # - cron: "30 21 * * 4"
-    - cron: "*/5 * * * *"
+    - cron: "30 21 * * 4"
 
 jobs:
   run:
