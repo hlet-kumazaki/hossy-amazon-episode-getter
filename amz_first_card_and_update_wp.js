@@ -89,7 +89,7 @@ if (!WP_USER || !WP_PASS) fail("WP credentials missing");
     const updated = typeof resultJson?.updated === "boolean"
       ? resultJson.updated
       : (resultJson?.meta?.skipped === false);
-    const reason = resultJson?.reason;
+    const reason = resultJson?.skipped_reason;
 
     const out = { episode_url, matched_post_id, updated };
     if (reason) out.reason = reason;
