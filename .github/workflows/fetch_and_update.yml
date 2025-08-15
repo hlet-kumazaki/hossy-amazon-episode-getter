@@ -3,8 +3,8 @@ name: Fetch & Update (AmazonMusic -> WP)
 on:
   workflow_dispatch:
     inputs:
-      channel_url:
-        description: "Amazon Music channel URL (override)"
+      post_id:
+        description: "Target post_id (optional)"
         required: false
         type: string
   schedule:
@@ -29,13 +29,13 @@ jobs:
       - name: Fetch URL & Update WP
         id: runit
         env:
-          CHANNEL_URL: ${{ inputs.channel_url != '' && inputs.channel_url || vars.CHANNEL_URL }}
+          CHANNEL_URL: ${{ vars.CHANNEL_URL }}   # ← 手動上書きは廃止。repo Variables からのみ取得
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
           FIELD_KEY: ${{ vars.FIELD_KEY }}
           ENDPOINTS: ${{ vars.ENDPOINTS }}
+          POST_ID: ${{ inputs.post_id }}         # ← 手動Run時だけ任意指定可
         run: |
-          : "${CHANNEL_URL:=${{ vars.CHANNEL_URL }}}"
           if [ -z "$CHANNEL_URL" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
           OUT=$(node amz_first_card_and_update_wp.js)
           echo "$OUT" | tee result.json
