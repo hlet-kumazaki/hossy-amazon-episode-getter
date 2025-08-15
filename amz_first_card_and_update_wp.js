@@ -60,7 +60,7 @@ if (!WP_USER || !WP_PASS) fail("WP credentials missing");
       field: FIELD_KEY,
       value: episode_url,
       is_acf: true,
-      skip_if_exists: false,
+      skip_if_exists: true,
     };
 
     let resultJson = null;
