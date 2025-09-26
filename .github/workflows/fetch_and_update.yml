@@ -56,14 +56,93 @@ jobs:
           CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
           RESULT_JSON: ${{ steps.runit.outputs.json }}
         run: |
-          # シンプルテキスト通知（cardsV2は後で差し替え可）
-          jq -n --arg status "${{ job.status }}" --arg json "$RESULT_JSON" '
-            { text:
-              ("[" + env.GITHUB_WORKFLOW + "] " + env.GITHUB_JOB
-               + "\nstatus: " + $status
-               + "\n" + ( try ($json|fromjson|tojson) catch $json )
-              )
-            }' \
+          set -euo pipefail
+          STATUS="${{ job.status }}"
+          SIMPLE_TEXT="[$GITHUB_WORKFLOW] $GITHUB_JOB"$'\n'"status: ${STATUS}"
+
+          # RESULT_JSON may be empty on early failures; handle gracefully
+          if [ -z "${RESULT_JSON:-}" ]; then
+            jq -n --arg t "$SIMPLE_TEXT" '{ text: $t }' \
+            | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
+            exit 0
+          fi
+
+          # Try to parse RESULT_JSON; if parse fails, fallback to simple text
+          if ! echo "$RESULT_JSON" | jq . >/dev/null 2>&1; then
+            jq -n --arg t "$SIMPLE_TEXT"$'\n\n'"(invalid RESULT_JSON)" '{ text: $t }' \
+            | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
+            exit 0
+          fi
+
+          ICON="✅"
+          if [ "$STATUS" != "success" ]; then ICON="🛑"; fi
+
+          # Build cardsV2 payload from RESULT_JSON
+          CARD_JSON=$(
+            jq -n \
+              --arg icon "$ICON" \
+              --arg status "$STATUS" \
+              --arg wf "$GITHUB_WORKFLOW" \
+              --arg job "$GITHUB_JOB" \
+              --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              --argjson res "$(echo "$RESULT_JSON" | jq '.')" '
+              def plat_line($p):
+                {
+                  decoratedText: {
+                    startIcon: { knownIcon: ( ($p.coherence.matched==true) then "CHECK_CIRCLE" else "ERROR" end ) },
+                    text: ( ($p.name // "?") + " — " +
+                            ( ($p.updated==true) then "updated" else
+                              ( ($p.skipped_reason//"")|length>0 ) then ("skipped: " + ($p.skipped_reason)) else "no-change"
+                            end
+                          )
+                          + ( if ($p.coherence|type=="object")
+                              then
+                                "  (" +
+                                "Episode expected " + ( ($p.coherence.expected//null)|tostring ) +
+                                " / actual " + ( ($p.coherence.actual//null)|tostring ) + " " +
+                                ( if $p.coherence.matched==true then "✅" else "❌" end )
+                                + ")"
+                              else "" end ),
+                    bottomText: ( ($p.episode_url // "-") )
+                  }
+                };
+              ';
+              {
+                cardsV2: [
+                  {
+                    cardId: "podcast_result",
+                    card: {
+                      header: {
+                        title: ($icon + " Podcast 更新: " + (if $status=="success" then "成功" else "失敗" end)),
+                        subtitle: ($wf + " / " + $job),
+                        imageUrl: null
+                      },
+                      sections: [
+                        {
+                          widgets: [
+                            { textParagraph: { text: ("Run: " + $run_url) } }
+                          ]
+                        },
+                        {
+                          header: "Platforms",
+                          widgets: ( ($res.platforms // []) | map( plat_line(.) ) )
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            '
+          )
+
+          # Fallback to text if we somehow failed to construct cards
+          if [ -z "$CARD_JSON" ]; then
+            jq -n --arg t "$SIMPLE_TEXT"$'\n\n'"$RESULT_JSON" '{ text: $t }' \
+            | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
+            exit 0
+          fi
+
+          echo "$CARD_JSON" \
           | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
 
       - uses: actions/upload-artifact@v4
