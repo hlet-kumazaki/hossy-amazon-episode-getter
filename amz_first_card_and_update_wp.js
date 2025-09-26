@@ -6,6 +6,10 @@ const WP_PASS = process.env.WP_PASS;
 const FIELD_KEY = process.env.FIELD_KEY || "field_680d867a57991";
 const POST_ID = process.env.POST_ID && String(process.env.POST_ID).trim();
 
+const YT_FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4vypjnhxhnyGERcqRGv5nA";
+const ITUNES_LOOKUP_URL = "https://itunes.apple.com/lookup?id=1810690058&country=JP&media=podcast&entity=podcastEpisode";
+const SPOTIFY_SHOW_ID = "1F9Wl0HZBxkHsVToJhpyQl";
+
 const ENDPOINTS_RAW = (process.env.ENDPOINTS || "").trim();
 const ENDPOINTS = ENDPOINTS_RAW
   ? ENDPOINTS_RAW.split(",").map(s => s.trim()).filter(Boolean)
@@ -34,6 +38,42 @@ function asPlatform(name, episode_url, srcObj) {
   const o = { name, episode_url, updated };
   if (reason) o.skipped_reason = reason;
   return o;
+}
+
+function episodeNumFromTitle(t) {
+  if (!t || typeof t !== "string") return null;
+  const m = t.match(/^\s*Episode\s*(\d+)/i);
+  return m ? Number(m[1]) : null;
+}
+
+async function getJson(url, timeoutMs = 15000) {
+  const ac = new AbortController();
+  const id = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: ac.signal, headers: { "Accept": "*/*" } });
+    const text = await r.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { data = null; }
+    return { ok: r.ok, status: r.status, text, json: data };
+  } catch (e) {
+    return { ok: false, status: 0, text: String(e), json: null };
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+async function getText(url, timeoutMs = 15000) {
+  const ac = new AbortController();
+  const id = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: ac.signal, headers: { "Accept": "text/html,*/*" } });
+    const text = await r.text();
+    return { ok: r.ok, status: r.status, text };
+  } catch (e) {
+    return { ok: false, status: 0, text: String(e) };
+  } finally {
+    clearTimeout(id);
+  }
 }
 
 (async () => {
@@ -65,6 +105,52 @@ function asPlatform(name, episode_url, srcObj) {
     }
     const episode_url = href;
 
+    // === 整合性チェック用：サイトの最新Episode番号を取得 ===
+    const latestSite = await getJson("https://hossy.org/wp-json/agent/v1/latest");
+    const expectedEpisode = latestSite?.json?.episode_num ?? null;
+
+    // Amazon（チャンネルの最初のカードからタイトルを推測）
+    let amazonTitle = null;
+    try {
+      const titleNode = item.locator('[slot="title"], .title, [data-testid="title"]').first();
+      if (await titleNode.count()) amazonTitle = (await titleNode.innerText()).trim();
+    } catch {}
+
+    // 他PFの最新タイトル（軽量取得、失敗しても続行）
+    let ytTitle = null, itTitle = null, spTitle = null;
+
+    // YouTube: Atom feed
+    try {
+      const r = await getText(YT_FEED_URL);
+      if (r.ok) {
+        const m = r.text.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/i);
+        if (m) ytTitle = m[1];
+      }
+    } catch {}
+
+    // iTunes: Lookup API
+    try {
+      const r = await getJson(ITUNES_LOOKUP_URL);
+      if (r.ok && r.json && Array.isArray(r.json.results)) {
+        const ep = r.json.results.find(x => x.wrapperType === "podcastEpisode");
+        if (ep) itTitle = ep.trackName || ep.collectionName || null;
+      }
+    } catch {}
+
+    // Spotify: Web（クローラでshowページ先頭のエピソード名を拾う）
+    try {
+      const spPage = await context.newPage();
+      await spPage.goto(`https://open.spotify.com/show/${SPOTIFY_SHOW_ID}`, { waitUntil: "domcontentloaded", timeout: 90000 });
+      await spPage.waitForLoadState("networkidle", { timeout: 60000 });
+      const firstEp = spPage.locator('a[href^="/episode/"]').first();
+      if (await firstEp.count()) {
+        // 近接のテキストノードを拾う（UI変更に弱いがまずは暫定）
+        const container = firstEp.locator('xpath=ancestor-or-self::*[1]');
+        spTitle = (await container.innerText()).split('\n').filter(Boolean)[0] || null;
+      }
+      await spPage.close();
+    } catch {}
+
     // ② WPエンドポイントへPOST
     const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
     const baseBody = {
@@ -95,37 +181,73 @@ function asPlatform(name, episode_url, srcObj) {
 
     // ③ プラットフォーム配列を組み立て
     const matched_post_id = resultJson?.post_id ?? null;
-
     const platforms = [];
 
-    // a) Amazon（今回の主対象）
-    platforms.push(asPlatform("amazon_music", episode_url, resultJson));
+    const amazonPlatform = asPlatform("amazon_music", episode_url, resultJson);
+    amazonPlatform.coherence = {
+      expected: expectedEpisode,
+      actual: episodeNumFromTitle(amazonTitle),
+      title: amazonTitle,
+      matched: (expectedEpisode != null && episodeNumFromTitle(amazonTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+    };
+    platforms.push(amazonPlatform);
 
-    // b) YouTube / iTunes（PHP: feeds.youtube / feeds.itunes）
     const feeds = resultJson?.feeds || {};
     const yt = feeds?.youtube;
     const it = feeds?.itunes;
 
     if (yt) {
-      const yt_url =
-        yt?.episode_url || yt?.url || yt?.value || yt?.link || null;
-      platforms.push(asPlatform("youtube", yt_url, yt));
-    }
-    if (it) {
-      const it_url =
-        it?.episode_url || it?.url || it?.value || it?.link || null;
-      platforms.push(asPlatform("itunes", it_url, it));
+      const yt_url = yt?.episode_url || yt?.url || yt?.value || yt?.link || null;
+      const obj = asPlatform("youtube", yt_url, yt);
+      obj.coherence = {
+        expected: expectedEpisode,
+        actual: episodeNumFromTitle(ytTitle),
+        title: ytTitle,
+        matched: (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+      };
+      platforms.push(obj);
+    } else {
+      // 既存値あり等でURL不明でもタイトルチェックだけ入れる
+      const obj = asPlatform("youtube", null, yt || {});
+      obj.coherence = {
+        expected: expectedEpisode, actual: episodeNumFromTitle(ytTitle), title: ytTitle,
+        matched: (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+      };
+      platforms.push(obj);
     }
 
-    // c) Spotify（PHP: spotify.enabled/result）
+    if (it) {
+      const it_url = it?.episode_url || it?.url || it?.value || it?.link || null;
+      const obj = asPlatform("itunes", it_url, it);
+      obj.coherence = {
+        expected: expectedEpisode,
+        actual: episodeNumFromTitle(itTitle),
+        title: itTitle,
+        matched: (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+      };
+      platforms.push(obj);
+    } else {
+      const obj = asPlatform("itunes", null, it || {});
+      obj.coherence = {
+        expected: expectedEpisode, actual: episodeNumFromTitle(itTitle), title: itTitle,
+        matched: (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+      };
+      platforms.push(obj);
+    }
+
     const sp_wrap = resultJson?.spotify || {};
     const sp = sp_wrap?.result || null;
-    if (sp || sp_wrap?.enabled) {
-      const sp_url =
-        (sp && (sp?.episode_url || sp?.url || sp?.value || sp?.link))
-        || null;
-      platforms.push(asPlatform("spotify", sp_url, sp || sp_wrap));
-    }
+    const sp_url =
+      (sp && (sp?.episode_url || sp?.url || sp?.value || sp?.link))
+      || null;
+    const spObj = asPlatform("spotify", sp_url, sp || sp_wrap);
+    spObj.coherence = {
+      expected: expectedEpisode,
+      actual: episodeNumFromTitle(spTitle),
+      title: spTitle,
+      matched: (expectedEpisode != null && episodeNumFromTitle(spTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+    };
+    platforms.push(spObj);
 
     // ④ 最終出力（要望フォーマット）
     return finish({ matched_post_id, platforms });
