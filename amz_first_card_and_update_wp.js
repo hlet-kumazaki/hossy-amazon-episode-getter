@@ -46,6 +46,13 @@ function episodeNumFromTitle(t) {
   return m ? Number(m[1]) : null;
 }
 
+function episodeNumFromUrl(u) {
+  if (!u || typeof u !== "string") return null;
+  const dec = decodeURIComponent(u);
+  const m = dec.match(/episode[\s\-_/]*([0-9]{1,4})/i);
+  return m ? Number(m[1]) : null;
+}
+
 async function getJson(url, timeoutMs = 15000) {
   const ac = new AbortController();
   const id = setTimeout(() => ac.abort(), timeoutMs);
@@ -90,9 +97,11 @@ async function getText(url, timeoutMs = 15000) {
     await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
     await page.waitForLoadState("networkidle", { timeout: 60000 });
 
-    const item = page.locator("music-episode-row-item").first();
+    // === Amazon Music: 最初のエピソード（row-item を採用） ===
+    const item = page.locator('music-episode-row-item').first();
     if (!(await item.count())) return fail();
 
+    // URLの拾い方：1) primary-href → 2) 内部リンク /episodes/ のhref
     let href = await item.getAttribute("primary-href");
     if (!href) {
       const link = item.locator('a[href*="/episodes/"]').first();
@@ -112,9 +121,29 @@ async function getText(url, timeoutMs = 15000) {
     // Amazon（チャンネルの最初のカードからタイトルを推測）
     let amazonTitle = null;
     try {
-      const titleNode = item.locator('[slot="title"], .title, [data-testid="title"]').first();
-      if (await titleNode.count()) amazonTitle = (await titleNode.innerText()).trim();
+      // 1st: row-item の primary-text 属性（これが最も確実）
+      const attrTitle = await item.getAttribute("primary-text");
+      if (attrTitle && attrTitle.trim()) {
+        amazonTitle = attrTitle.trim();
+      }
+      // 2nd: スロット/一般セレクタ
+      if (!amazonTitle) {
+        const titleNode = item.locator('[slot="title"], .title, [data-testid="title"]').first();
+        if (await titleNode.count()) {
+          const t = (await titleNode.innerText()).trim();
+          if (t) amazonTitle = t;
+        }
+      }
+      // 3rd: textContent の1行目（Shadow DOM対策の最終手段）
+      if (!amazonTitle) {
+        const raw = await item.evaluate(el => (el.textContent || '').trim());
+        if (raw) {
+          amazonTitle = raw.split('\n').map(s => s.trim()).filter(Boolean)[0] || raw.replace(/\s+/g, ' ');
+        }
+      }
     } catch {}
+
+    const amazonActual = (episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url));
 
     // 他PFの最新タイトル（軽量取得、失敗しても続行）
     let ytTitle = null, itTitle = null, spTitle = null;
@@ -186,9 +215,9 @@ async function getText(url, timeoutMs = 15000) {
     const amazonPlatform = asPlatform("amazon_music", episode_url, resultJson);
     amazonPlatform.coherence = {
       expected: expectedEpisode,
-      actual: episodeNumFromTitle(amazonTitle),
+      actual: amazonActual,
       title: amazonTitle,
-      matched: (expectedEpisode != null && episodeNumFromTitle(amazonTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+      matched: (expectedEpisode == null) ? true : (amazonActual === expectedEpisode)
     };
     platforms.push(amazonPlatform);
 
