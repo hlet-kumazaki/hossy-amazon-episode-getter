@@ -98,13 +98,9 @@ jobs:
                           else "no-change" end end
                         ),
                         ( if ($p.coherence|type) == "object"
-                          then
-                            "  (" +
-                            "Episode expected " + ( ($p.coherence.expected//null)|tostring ) +
-                            " / actual " + ( ($p.coherence.actual//null)|tostring ) +
-                            ")"
+                          then "  (最新エピソード整合性 " + ( if $p.coherence.matched==true then "✅" else "❌" end ) + ")"
                           else "" end ),
-                        ( if ($p.episode_url//"")|length>0
+                        ( if ($p.updated==true and ($p.episode_url//"")|length>0)
                           then "  • URL: " + ($p.episode_url)
                           else "" end )
                       ] | join("")
