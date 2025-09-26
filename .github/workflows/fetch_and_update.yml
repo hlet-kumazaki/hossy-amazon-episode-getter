@@ -94,13 +94,13 @@ jobs:
                         ( if ($p.coherence.matched==true) then "✅ " else "❌ " end ),
                         ($p.name // "?"), " — ",
                         ( if ($p.updated==true) then "updated"
-                          else if (($p.skipped_reason//"")|length>0) then ("skipped: " + ($p.skipped_reason))
+                          else if ( ($p.skipped_reason|type)=="string" and ($p.skipped_reason|length>0) ) then ("skipped: " + ($p.skipped_reason))
                           else "no-change" end end
                         ),
                         ( if ($p.coherence|type) == "object"
                           then "  (最新エピソード整合性 " + ( if $p.coherence.matched==true then "✅" else "❌" end ) + ")"
                           else "" end ),
-                        ( if ($p.updated==true and ($p.episode_url//"")|length>0)
+                        ( if ($p.updated==true and (($p.episode_url|type)=="string" and ($p.episode_url|length>0)) )
                           then "  • URL: " + ($p.episode_url)
                           else "" end )
                       ] | join("")
