@@ -104,10 +104,12 @@ jobs:
                             " / actual " + ( ($p.coherence.actual//null)|tostring ) + " " +
                             ( if $p.coherence.matched==true then "✅" else "❌" end )
                             + ")"
+                          else "" end ),
+                        ( if ($p.episode_url//"")|length>0
+                          then "  • URL: " + ($p.episode_url)
                           else "" end )
                       ] | join("")
-                    ),
-                    bottomText: ( ($p.episode_url // "-") )
+                    )
                   }
                 }
               ;
