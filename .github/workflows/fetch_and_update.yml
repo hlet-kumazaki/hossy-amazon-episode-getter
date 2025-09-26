@@ -89,24 +89,26 @@ jobs:
               def plat_line($p):
                 {
                   decoratedText: {
-                    startIcon: { knownIcon: ( ($p.coherence.matched==true) then "CHECK_CIRCLE" else "ERROR" end ) },
-                    text: ( ($p.name // "?") + " — " +
-                            ( ($p.updated==true) then "updated" else
-                              ( ($p.skipped_reason//"")|length>0 ) then ("skipped: " + ($p.skipped_reason)) else "no-change"
-                            end
-                          )
-                          + ( if ($p.coherence|type=="object")
-                              then
-                                "  (" +
-                                "Episode expected " + ( ($p.coherence.expected//null)|tostring ) +
-                                " / actual " + ( ($p.coherence.actual//null)|tostring ) + " " +
-                                ( if $p.coherence.matched==true then "✅" else "❌" end )
-                                + ")"
-                              else "" end ),
+                    startIcon: { knownIcon: ( if ($p.coherence.matched==true) then "CHECK_CIRCLE" else "ERROR" end ) },
+                    text:
+                      ( ($p.name // "?") + " — " +
+                        ( if ($p.updated==true) then "updated"
+                          else if (($p.skipped_reason//"")|length>0) then ("skipped: " + ($p.skipped_reason))
+                          else "no-change" end end
+                        )
+                      )
+                      + ( if ($p.coherence|type) == "object"
+                          then
+                            "  (" +
+                            "Episode expected " + ( ($p.coherence.expected//null)|tostring ) +
+                            " / actual " + ( ($p.coherence.actual//null)|tostring ) + " " +
+                            ( if $p.coherence.matched==true then "✅" else "❌" end )
+                            + ")"
+                          else "" end ),
                     bottomText: ( ($p.episode_url // "-") )
                   }
-                };
-              ';
+                }
+              ;
               {
                 cardsV2: [
                   {
@@ -132,7 +134,7 @@ jobs:
                   }
                 ]
               }
-            '
+              '
           )
 
           # Fallback to text if we somehow failed to construct cards
