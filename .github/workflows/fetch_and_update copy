@@ -50,22 +50,6 @@ jobs:
           echo '${{ steps.runit.outputs.json }}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Notify to Google Chat
-        if: always()  # 成功/失敗どちらも通知
-        env:
-          CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
-          RESULT_JSON: ${{ steps.runit.outputs.json }}
-        run: |
-          # シンプルテキスト通知（cardsV2は後で差し替え可）
-          jq -n --arg status "${{ job.status }}" --arg json "$RESULT_JSON" '
-            { text:
-              ("[" + env.GITHUB_WORKFLOW + "] " + env.GITHUB_JOB
-               + "\nstatus: " + $status
-               + "\n" + ( try ($json|fromjson|tojson) catch $json )
-              )
-            }' \
-          | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
-
       - uses: actions/upload-artifact@v4
         with:
           name: result
