@@ -117,6 +117,8 @@ async function getText(url, timeoutMs = 15000) {
     // === 整合性チェック用：サイトの最新Episode番号を取得 ===
     const latestSite = await getJson("https://hossy.org/wp-json/agent/v1/latest");
     const expectedEpisode = latestSite?.json?.episode_num ?? null;
+    const targetTitle = latestSite?.json?.title || null;
+    const targetUrl   = latestSite?.json?.url   || null;
 
     // Amazon（チャンネルの最初のカードからタイトルを推測）
     let amazonTitle = null;
@@ -279,7 +281,7 @@ async function getText(url, timeoutMs = 15000) {
     platforms.push(spObj);
 
     // ④ 最終出力（要望フォーマット）
-    return finish({ matched_post_id, platforms });
+    return finish({ matched_post_id, target_title: targetTitle, target_url: targetUrl, platforms });
   } catch {
     return fail();
   } finally {

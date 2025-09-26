@@ -86,12 +86,19 @@ jobs:
               --arg job "$GITHUB_JOB" \
               --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
               --argjson res "$(echo "$RESULT_JSON" | jq '.')" '
+              def status_text($ps):
+                ( $ps | ( [ .[] | select(.updated==true) ] | length ) ) as $ok
+                | ( $ps | length ) as $tot
+                | if $ok==0 then "全て失敗"
+                  elif $ok==$tot then "全て成功"
+                  else "一部成功" end
+              ;
               def plat_line($p):
                 {
                   decoratedText: {
                     text: (
                       [
-                        ( if ($p.coherence.matched==true) then "✅ " else "❌ " end ),
+                        ( if ($p.updated==true) then "✅ " else "🟥 " end ),
                         ($p.name // "?"), " — ",
                         ( if ($p.updated==true) then "updated"
                           else if ( ($p.skipped_reason|type)=="string" and ($p.skipped_reason|length>0) ) then ("skipped: " + ($p.skipped_reason))
@@ -99,9 +106,6 @@ jobs:
                         ),
                         ( if ($p.coherence|type) == "object"
                           then "  (最新エピソード整合性 " + ( if $p.coherence.matched==true then "✅" else "❌" end ) + ")"
-                          else "" end ),
-                        ( if ($p.updated==true and (($p.episode_url|type)=="string" and ($p.episode_url|length>0)) )
-                          then "  • URL: " + ($p.episode_url)
                           else "" end )
                       ] | join("")
                     )
@@ -114,14 +118,20 @@ jobs:
                     cardId: "podcast_result",
                     card: {
                       header: {
-                        title: ($icon + " Podcast 更新: " + (if $status=="success" then "成功" else "失敗" end)),
-                        subtitle: ($wf + " / " + $job),
+                        title: ("エピソードURL更新通知 — " + status_text($res.platforms)),
+                        subtitle: "",
                         imageUrl: null
                       },
                       sections: [
                         {
                           widgets: [
-                            { textParagraph: { text: ("Run: " + $run_url) } }
+                            { textParagraph: { text:
+                              (
+                                "対象ページ：" +
+                                ( ($res.target_title // "(title unknown)") ) + "\n" +
+                                ( ($res.target_url // "(url unknown)") )
+                              )
+                            } }
                           ]
                         },
                         {
