@@ -59,6 +59,11 @@ jobs:
           set -euo pipefail
           RES="${RESULT_JSON:-{}}"
 
+          # Validate JSON; if invalid, fall back to empty object to avoid mixed outputs
+          if ! jq . >/dev/null 2>&1 <<<"$RES"; then
+            RES="{}"
+          fi
+
           # Compute overall status text from RESULT_JSON
           STATUS_TXT=$(
             jq -r '
@@ -71,30 +76,32 @@ jobs:
             ' <<<"$RES" 2>/dev/null || echo "不明"
           )
 
-          TARGET_TITLE=$(jq -r '.target_title // "(title unknown)"' <<<"$RES" 2>/dev/null || echo "(title unknown)")
-          TARGET_URL=$(jq -r '.target_url // "(url unknown)"' <<<"$RES" 2>/dev/null || echo "(url unknown)")
+          TARGET_TITLE=$(jq -r '(.target_title // "")' <<<"$RES")
+          if [ -z "$TARGET_TITLE" ] || [ "$TARGET_TITLE" = "null" ]; then TARGET_TITLE="(title unknown)"; fi
+
+          TARGET_URL=$(jq -r '(.target_url // "")' <<<"$RES")
+          if [ -z "$TARGET_URL" ] || [ "$TARGET_URL" = "null" ]; then TARGET_URL="(url unknown)"; fi
 
           SUBJECT="エピソードURL更新通知 — ${STATUS_TXT} / ${TARGET_TITLE}"
 
           PLATFORM_LINES=$(
             jq -r '
-              (.platforms // []) as $ps
-              | if ($ps|length)==0 then "(platform data: none)"
-                else
-                  [
-                    $ps[] |
-                      "* " + (.name // "?") + " — " +
-                      ( if .updated==true then "updated"
-                        else if ((.skipped_reason|type)=="string" and (.skipped_reason|length>0)) then ("skipped: " + .skipped_reason)
-                        else "no-change" end end
-                      ) +
-                      ( if (.coherence|type)=="object"
-                        then "  (最新エピソード整合性 " + ( if .coherence.matched==true then "✅" else "❌" end ) + ")"
-                        else "" end
-                      )
-                  ] | join("\n")
+              if ((.platforms|type) == "array" and (.platforms|length) > 0) then
+                [
+                  .platforms[] |
+                  "* " + (.name // "?") + " — " +
+                  ( if .updated==true then "updated"
+                    else if ((.skipped_reason|type)=="string" and (.skipped_reason|length>0)) then ("skipped: " + .skipped_reason)
+                    else "no-change" end end
+                  ) +
+                  ( if (.coherence|type)=="object"
+                    then "  (最新エピソード整合性 " + ( if .coherence.matched==true then "✅" else "❌" end ) + ")"
+                    else "" end )
+                ] | join("\n")
+              else
+                "(platform data: none)"
               end
-            ' <<<"$RES" 2>/dev/null || echo "(platform data parse error)"
+            ' <<<"$RES" 2>/dev/null || echo "(platform data: none)"
           )
 
           {
@@ -128,10 +135,7 @@ jobs:
           # to: hossy@hossy.org,y.kumazaki@hlet.jp
           to: y.kumazaki@hlet.jp
           from: ${{ secrets.MAIL_FROM }}
-          from_name: ${{ vars.MAIL_FROM_NAME }}
           body: ${{ steps.emailprep.outputs.body }}
-          content_type: text/plain; charset=UTF-8
-          attachments: result.json
 
       - uses: actions/upload-artifact@v4
         with:
