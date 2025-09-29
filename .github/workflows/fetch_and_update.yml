@@ -111,7 +111,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           {
-            echo "body<<'EOF'"
+            echo "body<<EOF"
             cat email_body.txt
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
