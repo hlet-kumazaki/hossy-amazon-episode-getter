@@ -105,7 +105,11 @@ jobs:
             echo "${PLATFORM_LINES}"
           } > email_body.txt
 
-          echo "subject=${SUBJECT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "subject<<EOF"
+            printf '%s\n' "$SUBJECT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           {
             echo "body<<'EOF'"
             cat email_body.txt
