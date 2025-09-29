@@ -50,111 +50,84 @@ jobs:
           echo '${{ steps.runit.outputs.json }}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Notify to Google Chat
-        if: always()  # 成功/失敗どちらも通知
+      - name: Prepare email content
+        if: always()
+        id: emailprep
         env:
-          CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
           RESULT_JSON: ${{ steps.runit.outputs.json }}
         run: |
           set -euo pipefail
-          STATUS="${{ job.status }}"
-          SIMPLE_TEXT="[$GITHUB_WORKFLOW] $GITHUB_JOB"$'\n'"status: ${STATUS}"
+          RES="${RESULT_JSON:-{}}"
 
-          # RESULT_JSON may be empty on early failures; handle gracefully
-          if [ -z "${RESULT_JSON:-}" ]; then
-            jq -n --arg t "$SIMPLE_TEXT" '{ text: $t }' \
-            | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
-            exit 0
-          fi
-
-          # Try to parse RESULT_JSON; if parse fails, fallback to simple text
-          if ! echo "$RESULT_JSON" | jq . >/dev/null 2>&1; then
-            jq -n --arg t "$SIMPLE_TEXT"$'\n\n'"(invalid RESULT_JSON)" '{ text: $t }' \
-            | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
-            exit 0
-          fi
-
-          ICON="✅"
-          if [ "$STATUS" != "success" ]; then ICON="🛑"; fi
-
-          # Build cardsV2 payload from RESULT_JSON
-          CARD_JSON=$(
-            jq -n \
-              --arg icon "$ICON" \
-              --arg status "$STATUS" \
-              --arg wf "$GITHUB_WORKFLOW" \
-              --arg job "$GITHUB_JOB" \
-              --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-              --argjson res "$(echo "$RESULT_JSON" | jq '.')" '
-              def status_text($ps):
-                ( $ps | ( [ .[] | select(.updated==true) ] | length ) ) as $ok
-                | ( $ps | length ) as $tot
-                | if $ok==0 then "全て失敗"
-                  elif $ok==$tot then "全て成功"
-                  else "一部成功" end
-              ;
-              def plat_line($p):
-                {
-                  decoratedText: {
-                    text: (
-                      [
-                        ( if ($p.updated==true) then "✅ " else "🟥 " end ),
-                        ($p.name // "?"), " — ",
-                        ( if ($p.updated==true) then "updated"
-                          else if ( ($p.skipped_reason|type)=="string" and ($p.skipped_reason|length>0) ) then ("skipped: " + ($p.skipped_reason))
-                          else "no-change" end end
-                        ),
-                        ( if ($p.coherence|type) == "object"
-                          then "  (最新エピソード整合性 " + ( if $p.coherence.matched==true then "✅" else "❌" end ) + ")"
-                          else "" end )
-                      ] | join("")
-                    )
-                  }
-                }
-              ;
-              {
-                cardsV2: [
-                  {
-                    cardId: "podcast_result",
-                    card: {
-                      header: {
-                        title: ("エピソードURL更新通知 — " + status_text($res.platforms)),
-                        subtitle: "",
-                        imageUrl: null
-                      },
-                      sections: [
-                        {
-                          widgets: [
-                            { textParagraph: { text:
-                              (
-                                "対象ページ：" +
-                                ( ($res.target_title // "(title unknown)") ) + "\n" +
-                                ( ($res.target_url // "(url unknown)") )
-                              )
-                            } }
-                          ]
-                        },
-                        {
-                          header: "Platforms",
-                          widgets: ( ($res.platforms // []) | map( plat_line(.) ) )
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-              '
+          # Compute overall status text from RESULT_JSON
+          STATUS_TXT=$(
+            jq -r '
+              def okcount: ([.platforms[]? | select(.updated==true)] | length);
+              def total: (.platforms|length // 0);
+              if (total == 0) then "不明"
+              elif (okcount==0) then "全て失敗"
+              elif (okcount==total) then "全て成功"
+              else "一部成功" end
+            ' <<<"$RES" 2>/dev/null || echo "不明"
           )
 
-          # Fallback to text if we somehow failed to construct cards
-          if [ -z "$CARD_JSON" ]; then
-            jq -n --arg t "$SIMPLE_TEXT"$'\n\n'"$RESULT_JSON" '{ text: $t }' \
-            | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
-            exit 0
-          fi
+          TARGET_TITLE=$(jq -r '.target_title // "(title unknown)"' <<<"$RES" 2>/dev/null || echo "(title unknown)")
+          TARGET_URL=$(jq -r '.target_url // "(url unknown)"' <<<"$RES" 2>/dev/null || echo "(url unknown)")
 
-          echo "$CARD_JSON" \
-          | curl -sS -X POST "$CHAT_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
+          SUBJECT="エピソードURL更新通知 — ${STATUS_TXT} / ${TARGET_TITLE}"
+
+          PLATFORM_LINES=$(
+            jq -r '
+              (.platforms // []) as $ps
+              | if ($ps|length)==0 then "(platform data: none)"
+                else
+                  [
+                    $ps[] |
+                      "* " + (.name // "?") + " — " +
+                      ( if .updated==true then "updated"
+                        else if ((.skipped_reason|type)=="string" and (.skipped_reason|length>0)) then ("skipped: " + .skipped_reason)
+                        else "no-change" end end
+                      ) +
+                      ( if (.coherence|type)=="object"
+                        then "  (最新エピソード整合性 " + ( if .coherence.matched==true then "✅" else "❌" end ) + ")"
+                        else "" end
+                      )
+                  ] | join("\n")
+              end
+            ' <<<"$RES" 2>/dev/null || echo "(platform data parse error)"
+          )
+
+          {
+            echo "エピソードURL更新通知"
+            echo "対象ページ：${TARGET_TITLE}"
+            echo "${TARGET_URL}"
+            echo
+            echo "${PLATFORM_LINES}"
+          } > email_body.txt
+
+          echo "subject=${SUBJECT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<'EOF'"
+            cat email_body.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send notification email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: ${{ steps.emailprep.outputs.subject }}
+          # to: hossy@hossy.org,y.kumazaki@hlet.jp
+          to: y.kumazaki@hlet.jp
+          from: ${{ secrets.MAIL_FROM }}
+          from_name: ${{ vars.MAIL_FROM_NAME }}
+          body: ${{ steps.emailprep.outputs.body }}
+          content_type: text/plain; charset=UTF-8
+          attachments: result.json
 
       - uses: actions/upload-artifact@v4
         with:
