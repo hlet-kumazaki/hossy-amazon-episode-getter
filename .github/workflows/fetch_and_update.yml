@@ -133,8 +133,8 @@ jobs:
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
           subject: ${{ steps.emailprep.outputs.subject }}
-          # to: hossy@hossy.org,y.kumazaki@hlet.jp
-          to: y.kumazaki@hlet.jp
+          to: hossy@hossy.org,y.kumazaki@hlet.jp
+          # to: y.kumazaki@hlet.jp
           from: ${{ secrets.MAIL_FROM }}
           body: ${{ steps.emailprep.outputs.body }}
 
