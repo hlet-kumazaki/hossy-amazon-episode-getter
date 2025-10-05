@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+const { chromium } = require("playwright");
 
 const CHANNEL_URL = process.env.CHANNEL_URL;
 const WP_USER = process.env.WP_USER;
@@ -13,24 +13,32 @@ const SPOTIFY_SHOW_ID = "1F9Wl0HZBxkHsVToJhpyQl";
 const ENDPOINTS_RAW = (process.env.ENDPOINTS || "").trim();
 const ENDPOINTS = ENDPOINTS_RAW
   ? ENDPOINTS_RAW.split(",").map(s => s.trim()).filter(Boolean)
-  : ["https://hossy.org/wp-json/agent/v1/meta", "https://hossy.org/wp-json/agent/v1/meta/"]; 
+  : [
+      "https://hossy.org/wp-json/agent/v1/meta",
+      "https://hossy.org/wp-json/agent/v1/meta/"
+    ];
 
-const finish = (obj) => { process.stdout.write(JSON.stringify(obj) + "\n"); process.exit(0); };
-const fail   = (msg="Amazon Music page could not be loaded") => finish({ error: msg });
+function finish(obj) {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+  process.exit(0);
+}
+function fail(msg = "Amazon Music page could not be loaded") {
+  finish({ error: msg });
+}
 
 if (!CHANNEL_URL) fail("CHANNEL_URL missing");
 if (!WP_USER || !WP_PASS) fail("WP credentials missing");
 
 function pickUpdated(obj) {
-  const meta = obj?.meta || {};
-  if (typeof obj?.updated === "boolean") return obj.updated;
+  const meta = (obj && obj.meta) || {};
+  if (typeof (obj && obj.updated) === "boolean") return obj.updated;
   if (typeof meta.updated === "boolean") return meta.updated;
   if (typeof meta.skipped === "boolean") return meta.skipped === false;
   return false;
 }
 function pickReason(obj) {
-  const meta = obj?.meta || {};
-  return obj?.reason || obj?.skipped_reason || meta?.reason || meta?.skipped_reason || null;
+  const meta = (obj && obj.meta) || {};
+  return (obj && (obj.reason || obj.skipped_reason)) || meta.reason || meta.skipped_reason || null;
 }
 function asPlatform(name, episode_url, srcObj) {
   const updated = pickUpdated(srcObj);
@@ -45,7 +53,6 @@ function episodeNumFromTitle(t) {
   const m = t.match(/^\s*Episode\s*(\d+)/i);
   return m ? Number(m[1]) : null;
 }
-
 function episodeNumFromUrl(u) {
   if (!u || typeof u !== "string") return null;
   const dec = decodeURIComponent(u);
@@ -57,10 +64,12 @@ async function getJson(url, timeoutMs = 15000) {
   const ac = new AbortController();
   const id = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { signal: ac.signal, headers: { "Accept": "*/*" } });
+    const r = await fetch(url, { signal: ac.signal, headers: { Accept: "*/*" } });
     const text = await r.text();
     let data = null;
-    try { data = JSON.parse(text); } catch { data = null; }
+    try {
+      data = JSON.parse(text);
+    } catch {}
     return { ok: r.ok, status: r.status, text, json: data };
   } catch (e) {
     return { ok: false, status: 0, text: String(e), json: null };
@@ -68,12 +77,11 @@ async function getJson(url, timeoutMs = 15000) {
     clearTimeout(id);
   }
 }
-
 async function getText(url, timeoutMs = 15000) {
   const ac = new AbortController();
   const id = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { signal: ac.signal, headers: { "Accept": "text/html,*/*" } });
+    const r = await fetch(url, { signal: ac.signal, headers: { Accept: "text/html,*/*" } });
     const text = await r.text();
     return { ok: r.ok, status: r.status, text };
   } catch (e) {
@@ -86,18 +94,19 @@ async function getText(url, timeoutMs = 15000) {
 (async () => {
   let browser;
   try {
-    // ① Amazon Music の最初の横長カードからURL取得
+    // ① Amazon Music の最初の横長カードから URL 取得
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
       locale: "ja-JP",
       timezoneId: "Asia/Tokyo",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     });
     const page = await context.newPage();
     await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
     await page.waitForLoadState("networkidle", { timeout: 60000 });
 
-    const item = page.locator('music-episode-row-item').first();
+    const item = page.locator("music-episode-row-item").first();
     if (!(await item.count())) return fail();
 
     let href = await item.getAttribute("primary-href");
@@ -112,12 +121,13 @@ async function getText(url, timeoutMs = 15000) {
     }
     const episode_url = href;
 
-    // ② hossy.org 側の期待エピソード番号
+    // ② hossy.org 側の期待エピソード
     const latestSite = await getJson("https://hossy.org/wp-json/agent/v1/latest");
-    const expectedEpisode = latestSite?.json?.episode_num ?? null;
-    const targetTitle = latestSite?.json?.title || null;
-    const targetUrl   = latestSite?.json?.url   || null;
+    const expectedEpisode = latestSite && latestSite.json ? latestSite.json.episode_num : null;
+    const targetTitle = latestSite && latestSite.json ? latestSite.json.title : null;
+    const targetUrl = latestSite && latestSite.json ? latestSite.json.url : null;
 
+    // Amazon タイトル（推測）
     let amazonTitle = null;
     try {
       const attrTitle = await item.getAttribute("primary-text");
@@ -130,15 +140,17 @@ async function getText(url, timeoutMs = 15000) {
         }
       }
       if (!amazonTitle) {
-        const raw = await item.evaluate(el => (el.textContent || '').trim());
-        if (raw) amazonTitle = raw.split('\n').map(s => s.trim()).filter(Boolean)[0] || raw.replace(/\s+/g, ' ');
+        const raw = await item.evaluate((el) => (el.textContent || "").trim());
+        if (raw) amazonTitle = raw.split("\n").map((s) => s.trim()).filter(Boolean)[0] || raw.replace(/\s+/g, " ");
       }
     } catch {}
 
-    const amazonActual = (episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url));
+    const amazonActual = episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url);
 
-    // ③ 他PFの軽量チェック
-    let ytTitle = null, itTitle = null, spTitle = null;
+    // ③ 他PFの軽量取得
+    let ytTitle = null,
+      itTitle = null,
+      spTitle = null;
     try {
       const r = await getText(YT_FEED_URL);
       if (r.ok) {
@@ -149,23 +161,26 @@ async function getText(url, timeoutMs = 15000) {
     try {
       const r = await getJson(ITUNES_LOOKUP_URL);
       if (r.ok && r.json && Array.isArray(r.json.results)) {
-        const ep = r.json.results.find(x => x.wrapperType === "podcastEpisode");
+        const ep = r.json.results.find((x) => x.wrapperType === "podcastEpisode");
         if (ep) itTitle = ep.trackName || ep.collectionName || null;
       }
     } catch {}
     try {
       const spPage = await context.newPage();
-      await spPage.goto(`https://open.spotify.com/show/${SPOTIFY_SHOW_ID}`, { waitUntil: "domcontentloaded", timeout: 90000 });
+      await spPage.goto(`https://open.spotify.com/show/${SPOTIFY_SHOW_ID}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 90000,
+      });
       await spPage.waitForLoadState("networkidle", { timeout: 60000 });
       const firstEp = spPage.locator('a[href^="/episode/"]').first();
       if (await firstEp.count()) {
-        const container = firstEp.locator('xpath=ancestor-or-self::*[1]');
-        spTitle = (await container.innerText()).split('\n').filter(Boolean)[0] || null;
+        const container = firstEp.locator("xpath=ancestor-or-self::*[1]");
+        spTitle = (await container.innerText()).split("\n").filter(Boolean)[0] || null;
       }
       await spPage.close();
     } catch {}
 
-    // ④ WP更新
+    // ④ WP 更新
     const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
     const baseBody = { field: FIELD_KEY, value: episode_url, is_acf: true, skip_if_exists: true };
     const body = POST_ID ? { ...baseBody, post_id: POST_ID } : baseBody;
@@ -177,19 +192,23 @@ async function getText(url, timeoutMs = 15000) {
           method: "POST",
           headers: {
             "Content-Type": "application/json; charset=utf-8",
-            "Accept": "application/json",
-            "Authorization": auth,
+            Accept: "application/json",
+            Authorization: auth,
           },
           body: JSON.stringify(body),
         });
         const text = await res.text();
-        try { resultJson = JSON.parse(text); } catch { resultJson = { raw: text }; }
+        try {
+          resultJson = JSON.parse(text);
+        } catch {
+          resultJson = { raw: text };
+        }
         if (res.ok) break;
       } catch {}
     }
 
-    // ⑤ platforms組み立て
-    const matched_post_id = resultJson?.post_id ?? null;
+    // ⑤ platforms
+    const matched_post_id = resultJson && resultJson.post_id ? resultJson.post_id : null;
     const platforms = [];
 
     const amazonPlatform = asPlatform("amazon_music", episode_url, resultJson);
@@ -197,68 +216,92 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: amazonActual,
       title: amazonTitle,
-      matched: (expectedEpisode == null) ? true : (amazonActual === expectedEpisode)
+      matched: expectedEpisode == null ? true : amazonActual === expectedEpisode,
     };
     platforms.push(amazonPlatform);
 
-    const feeds = resultJson?.feeds || {};
-    const yt = feeds?.youtube;
-    const it = feeds?.itunes;
+    const feeds = (resultJson && resultJson.feeds) || {};
+    const yt = feeds.youtube;
+    const it = feeds.itunes;
 
     if (yt) {
-      const yt_url = yt?.episode_url || yt?.url || yt?.value || yt?.link || null;
+      const yt_url = yt.episode_url || yt.url || yt.value || yt.link || null;
       const obj = asPlatform("youtube", yt_url, yt);
       obj.coherence = {
         expected: expectedEpisode,
         actual: episodeNumFromTitle(ytTitle),
         title: ytTitle,
-        matched: (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+        matched:
+          (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
+          expectedEpisode == null
+            ? true
+            : false,
       };
       platforms.push(obj);
     } else {
       const obj = asPlatform("youtube", null, yt || {});
       obj.coherence = {
-        expected: expectedEpisode, actual: episodeNumFromTitle(ytTitle), title: ytTitle,
-        matched: (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+        expected: expectedEpisode,
+        actual: episodeNumFromTitle(ytTitle),
+        title: ytTitle,
+        matched:
+          (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
+          expectedEpisode == null
+            ? true
+            : false,
       };
       platforms.push(obj);
     }
 
     if (it) {
-      const it_url = it?.episode_url || it?.url || it?.value || it?.link || null;
+      const it_url = it.episode_url || it.url || it.value || it.link || null;
       const obj = asPlatform("itunes", it_url, it);
       obj.coherence = {
         expected: expectedEpisode,
         actual: episodeNumFromTitle(itTitle),
         title: itTitle,
-        matched: (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+        matched:
+          (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
+          expectedEpisode == null
+            ? true
+            : false,
       };
       platforms.push(obj);
     } else {
       const obj = asPlatform("itunes", null, it || {});
       obj.coherence = {
-        expected: expectedEpisode, actual: episodeNumFromTitle(itTitle), title: itTitle,
-        matched: (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+        expected: expectedEpisode,
+        actual: episodeNumFromTitle(itTitle),
+        title: itTitle,
+        matched:
+          (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
+          expectedEpisode == null
+            ? true
+            : false,
       };
       platforms.push(obj);
     }
 
-    const sp_wrap = resultJson?.spotify || {};
-    const sp = sp_wrap?.result || null;
-    const sp_url = (sp && (sp?.episode_url || sp?.url || sp?.value || sp?.link)) || null;
+    const sp_wrap = (resultJson && resultJson.spotify) || {};
+    const sp = sp_wrap.result || null;
+    const sp_url = (sp && (sp.episode_url || sp.url || sp.value || sp.link)) || null;
     const spObj = asPlatform("spotify", sp_url, sp || sp_wrap);
     spObj.coherence = {
       expected: expectedEpisode,
       actual: episodeNumFromTitle(spTitle),
       title: spTitle,
-      matched: (expectedEpisode != null && episodeNumFromTitle(spTitle) === expectedEpisode) || expectedEpisode == null ? true : false
+      matched:
+        (expectedEpisode != null && episodeNumFromTitle(spTitle) === expectedEpisode) ||
+        expectedEpisode == null
+          ? true
+          : false,
     };
     platforms.push(spObj);
 
     // ⑥ 出力
-    return finish({ matched_post_id, target_title: targetTitle, target_url: targetUrl, platforms });
-  } catch {
-    return fail();
+    finish({ matched_post_id, target_title: targetTitle, target_url: targetUrl, platforms });
+  } catch (e) {
+    fail(String(e && e.message ? e.message : e));
   } finally {
     if (browser) await browser.close();
   }
