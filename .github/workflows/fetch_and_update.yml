@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${CHANNEL_URL:-}" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
-          OUT=$(node amz_first_card_and_update_wp.js)
+          OUT=$(node amz_first_card_and_update_wp.cjs)
           echo "$OUT" | tee result.json
           echo "json=$OUT" >> "$GITHUB_OUTPUT"
 
