@@ -80,19 +80,20 @@ jobs:
           # Build platform sections in fixed order with human-readable labels + 取得ログ
           PLAT_SECTIONS=$( 
             echo "$RES" | jq -r '
+              def reason($p): ($p.skipped_reason // $p.reason // ($p.meta // {}).reason // ($p.meta // {}).skipped_reason);
+              def status($p):
+                if ($p.updated == true) then "成功"
+                elif (reason($p)) then "スキップ"
+                elif ($p.updated == false) then "失敗"
+                else "不明" end;
               def pick($name; $label):
                 ( first(.platforms[]? | select(.name==$name)) // {} ) as $p
                 | {
                     label:  $label,
                     sym:    ( if ($p.coherence.matched // false) then "✅" else "❌" end ),
                     url:    ( $p.episode_url // "" ),
-                    reason: (
-                      $p.skipped_reason
-                      // $p.reason
-                      // $p.meta?.reason
-                      // $p.meta?.skipped_reason
-                      // "（理由情報なし / PFデータ未取得）"
-                    )
+                    reason: ( reason($p) ),
+                    status: ( status($p) )
                   };
               [
                 pick("amazon_music"; "Amazon Music"),
@@ -101,12 +102,12 @@ jobs:
                 pick("spotify";      "Spotify")
               ]
               | .[]
-              | "◯\(.label)\n- 整合性チェック：\(.sym)\n- URL：\(.url // "（未取得）")\n- 取得ログ：\(.reason // "（理由情報なし / PFデータ未取得）")\n"
+              | "◯\(.label)\n- 整合性チェック：\(.sym)\n- 更新結果：\(.status)\n- URL：\(.url // "（未取得）")\n- 取得ログ：\(.reason // "—")\n"
             '
           )
 
           {
-            echo "エピソードURL更新通知を更新しました。"
+            echo "エピソードURL取り込みを実行しました。"
             echo
             echo "更新日時：${JST_NOW}"
             echo "対象ページ：${TARGET_TITLE}"
