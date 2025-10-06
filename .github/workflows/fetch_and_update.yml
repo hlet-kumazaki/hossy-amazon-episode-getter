@@ -74,7 +74,7 @@ jobs:
           TARGET_URL=$(echo   "$RES" | jq -r '.target_url   // "(url unknown)"')
           SUBJECT="エピソードURL更新通知 — ${STATUS_TXT} / ${TARGET_TITLE}"
 
-          # JST current timestamp for "更新日時：YYYY / mm / dd H:i"
+          # JST current timestamp for "じっし日時：YYYY / mm / dd H:i"
           JST_NOW=$(TZ=Asia/Tokyo date '+%Y / %m / %d %H:%M')
 
           # Build platform sections in fixed order with human-readable labels + 取得ログ
@@ -109,7 +109,7 @@ jobs:
           {
             echo "エピソードURL取り込みを実行しました。"
             echo
-            echo "更新日時：${JST_NOW}"
+            echo "実行日時：${JST_NOW}"
             echo "対象ページ：${TARGET_TITLE}"
             echo "${TARGET_URL}"
             echo
