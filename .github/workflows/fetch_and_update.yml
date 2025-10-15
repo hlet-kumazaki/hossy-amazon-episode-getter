@@ -7,9 +7,12 @@ on:
         description: "Target post_id (optional)"
         required: false
         type: string
+  repository_dispatch:
+    types: [run-fetch-update, cron-trigger]
+  # schedule は GitHub 側の遅延回避のため使用しない（ロリポップの cron で 06:03 JST に外部発火）
   #schedule:
-    # 毎週金曜 06:03 JST（= 木曜 21:03 UTC）
-    #- cron: "3 21 * * 4"
+  #  # 毎週金曜 06:03 JST（= 木曜 21:03 UTC）
+  #  - cron: "3 21 * * 4"
 
 jobs:
   run:
