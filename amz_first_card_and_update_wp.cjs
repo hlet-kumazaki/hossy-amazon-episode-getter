@@ -165,8 +165,8 @@ async function getText(url, timeoutMs = 15000) {
     // ② hossy.org 側の期待エピソード & 既存のプラットフォームURL
     const cacheBust = Date.now();
     const latestSite = await getJson(`https://hossy.org/wp-json/agent/v1/latest?t=${cacheBust}`);
-    //const expectedEpisode = latestSite && latestSite.json ? latestSite.json.episode_num : null;
-    const expectedEpisode = 1;
+    const expectedEpisode = latestSite && latestSite.json ? latestSite.json.episode_num : null;
+    //const expectedEpisode = 1;
     const targetTitle = latestSite && latestSite.json ? latestSite.json.title : null;
     const targetUrl = latestSite && latestSite.json ? latestSite.json.url : null;
     const targetPostId = latestSite && latestSite.json ? latestSite.json.post_id : null;
