@@ -263,9 +263,9 @@ async function getText(url, timeoutMs = 15000) {
     const amazonPlatform = asPlatform("amazon_music", finalAmazonUrl, resultJson);
     amazonPlatform.coherence = {
       expected: expectedEpisode,
-      actual: amazonActual,
-      title: amazonTitle,
-      matched: amazonMatched,
+      actual: needAmazon ? amazonActual : null,
+      title: needAmazon ? amazonTitle : null,
+      matched: needAmazon ? amazonMatched : null,  // 既存URLがある場合はN/A
     };
     platforms.push(amazonPlatform);
 
@@ -286,13 +286,14 @@ async function getText(url, timeoutMs = 15000) {
     
     ytObj.coherence = {
       expected: expectedEpisode,
-      actual: episodeNumFromTitle(ytTitle),
-      title: ytTitle,
-      matched:
-        (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
-        expectedEpisode == null
-          ? true
-          : false,
+      actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
+      title: needYouTube ? ytTitle : null,
+      matched: needYouTube
+        ? ((expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
+           expectedEpisode == null
+             ? true
+             : false)
+        : null,  // 既存URLがある場合はN/A
     };
     platforms.push(ytObj);
 
@@ -312,13 +313,14 @@ async function getText(url, timeoutMs = 15000) {
     
     itObj.coherence = {
       expected: expectedEpisode,
-      actual: episodeNumFromTitle(itTitle),
-      title: itTitle,
-      matched:
-        (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
-        expectedEpisode == null
-          ? true
-          : false,
+      actual: needItunes ? episodeNumFromTitle(itTitle) : null,
+      title: needItunes ? itTitle : null,
+      matched: needItunes
+        ? ((expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
+           expectedEpisode == null
+             ? true
+             : false)
+        : null,  // 既存URLがある場合はN/A
     };
     platforms.push(itObj);
 
@@ -337,13 +339,14 @@ async function getText(url, timeoutMs = 15000) {
     
     spObj.coherence = {
       expected: expectedEpisode,
-      actual: episodeNumFromTitle(spTitle),
-      title: spTitle,
-      matched:
-        (expectedEpisode != null && episodeNumFromTitle(spTitle) === expectedEpisode) ||
-        expectedEpisode == null
-          ? true
-          : false,
+      actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
+      title: needSpotify ? spTitle : null,
+      matched: needSpotify
+        ? ((expectedEpisode != null && episodeNumFromTitle(spTitle) === expectedEpisode) ||
+           expectedEpisode == null
+             ? true
+             : false)
+        : null,  // 既存URLがある場合はN/A
     };
     platforms.push(spObj);
 

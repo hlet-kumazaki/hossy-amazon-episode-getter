@@ -93,7 +93,7 @@ jobs:
                 ( first(.platforms[]? | select(.name==$name)) // {} ) as $p
                 | {
                     label:  $label,
-                    sym:    ( if ($p.coherence.matched // false) then "✅" else "❌" end ),
+                    sym:    ( if ($p.coherence.matched == null) then "--" elif ($p.coherence.matched // false) then "✅" else "❌" end ),
                     url:    ( $p.episode_url // "" ),
                     reason: ( reason($p) ),
                     status: ( status($p) )
