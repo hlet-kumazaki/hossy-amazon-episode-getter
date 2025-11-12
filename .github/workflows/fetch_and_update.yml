@@ -95,7 +95,7 @@ jobs:
                     label:  $label,
                     sym: (
                       if    ($p.coherence.matched == null)  then "--"
-                      elif  ($p.coherence.matched == true)  then "✅"
+                      elif  ($p.coherence.matched == true)  then "◯"
                       elif  ($p.coherence.matched == false) then "❌"
                       else "--"   # fallback for unexpected types
                       end
