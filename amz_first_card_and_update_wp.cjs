@@ -354,11 +354,12 @@ async function getText(url, timeoutMs = 15000) {
     const amazonReason = pickReason(resultAmazon);
     if (amazonReason) amazonPlatform.skipped_reason = amazonReason;
     if (!amazonReason && !pickUpdated(resultAmazon)) amazonPlatform.skipped_reason = "unknown";
+    const amazonWasSkipped = (pickUpdated(resultAmazon) === false) && !!pickReason(resultAmazon);
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
       title: needAmazon ? amazonTitle : null,
-      matched: (pickReason(resultAmazon) === "already_has_value")
+      matched: (!needAmazon || amazonWasSkipped)
         ? null
         : computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual)
     };
@@ -373,11 +374,12 @@ async function getText(url, timeoutMs = 15000) {
     const ytReason = pickReason(resultYouTube);
     if (ytReason) ytObj.skipped_reason = ytReason;
     if (!ytReason && !pickUpdated(resultYouTube)) ytObj.skipped_reason = "unknown";
+    const ytWasSkipped = (pickUpdated(resultYouTube) === false) && !!pickReason(resultYouTube);
     ytObj.coherence = {
       expected: expectedEpisode,
       actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
       title: needYouTube ? ytTitle : null,
-      matched: (pickReason(resultYouTube) === "already_has_value")
+      matched: (!needYouTube || ytWasSkipped)
         ? null
         : computeMatched(needYouTube, episodeNumFromTitle(ytTitle), expectedEpisode, amazonActual)
     };
@@ -392,11 +394,12 @@ async function getText(url, timeoutMs = 15000) {
     const itReason = pickReason(resultItunes);
     if (itReason) itObj.skipped_reason = itReason;
     if (!itReason && !pickUpdated(resultItunes)) itObj.skipped_reason = "unknown";
+    const itWasSkipped = (pickUpdated(resultItunes) === false) && !!pickReason(resultItunes);
     itObj.coherence = {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
       title: needItunes ? itTitle : null,
-      matched: (pickReason(resultItunes) === "already_has_value")
+      matched: (!needItunes || itWasSkipped)
         ? null
         : computeMatched(needItunes, episodeNumFromTitle(itTitle), expectedEpisode, amazonActual)
     };
@@ -411,11 +414,12 @@ async function getText(url, timeoutMs = 15000) {
     const spReason = pickReason(resultSpotify);
     if (spReason) spObj.skipped_reason = spReason;
     if (!spReason && !pickUpdated(resultSpotify)) spObj.skipped_reason = "unknown";
+    const spWasSkipped = (pickUpdated(resultSpotify) === false) && !!pickReason(resultSpotify);
     spObj.coherence = {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
       title: needSpotify ? spTitle : null,
-      matched: (pickReason(resultSpotify) === "already_has_value")
+      matched: (!needSpotify || spWasSkipped)
         ? null
         : computeMatched(needSpotify, episodeNumFromTitle(spTitle), expectedEpisode, amazonActual)
     };
