@@ -386,8 +386,23 @@ async function getText(url, timeoutMs = 15000) {
     };
     platforms.push(spObj);
 
-    // ⑥ 出力
-    finish({ matched_post_id, target_title: targetTitle, target_url: targetUrl, platforms });
+    // ⑥ 出力（デバッグ情報付き）
+    finish({ 
+      matched_post_id, 
+      target_title: targetTitle, 
+      target_url: targetUrl, 
+      platforms,
+      debug: {
+        needAmazon,
+        needYouTube,
+        needItunes,
+        needSpotify,
+        existingAmazon: existingAmazon || "(empty)",
+        existingYouTube: existingYouTube || "(empty)",
+        existingItunes: existingItunes || "(empty)",
+        existingSpotify: existingSpotify || "(empty)"
+      }
+    });
   } catch (e) {
     fail(String(e && e.message ? e.message : e));
   } finally {
