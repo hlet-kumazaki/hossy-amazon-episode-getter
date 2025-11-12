@@ -1,471 +1,546 @@
-const { chromium } = require("playwright");
+// amz_first_card_and_update_wp.cjs
+// 各PFのURLを「未登録ならだけ」自動取得して ACF に保存するスクリプト
+// 依存: Node 18+（fetch）, Playwright
 
-const CHANNEL_URL = process.env.CHANNEL_URL;
+const { chromium } = require('playwright');
+
+const LATEST_ENDPOINT =
+  process.env.LATEST_ENDPOINT || 'https://hossy.org/wp-json/agent/v1/latest';
+const META_ENDPOINT =
+  process.env.META_ENDPOINT || 'https://hossy.org/wp-json/agent/v1/meta';
+
 const WP_USER = process.env.WP_USER;
 const WP_PASS = process.env.WP_PASS;
-const FIELD_KEY_AMAZON = process.env.FIELD_KEY_AMAZON || "field_680d867a57991"; // backward compat
-const FIELD_KEY_YOUTUBE = process.env.FIELD_KEY_YOUTUBE || "field_680bf82a6b5c0";
-const FIELD_KEY_ITUNES  = process.env.FIELD_KEY_ITUNES  || "field_680bf86a6b5c2";
-const FIELD_KEY_SPOTIFY = process.env.FIELD_KEY_SPOTIFY || "field_680bf85c6b5c1";
-const POST_ID = process.env.POST_ID && String(process.env.POST_ID).trim();
 
-const YT_FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4vypjnhxhnyGERcqRGv5nA";
-const ITUNES_LOOKUP_URL = "https://itunes.apple.com/lookup?id=1810690058&country=JP&media=podcast&entity=podcastEpisode";
-const SPOTIFY_SHOW_ID = "1F9Wl0HZBxkHsVToJhpyQl";
+// Amazon
+const AMAZON_CHANNEL_URL = process.env.CHANNEL_URL; // Amazon Music の番組URL
+const FIELD_KEY_AMAZON =
+  process.env.FIELD_KEY_AMAZON || process.env.FIELD_KEY || ''; // ACF field_key
+const META_KEY_AMAZON =
+  process.env.META_KEY_AMAZON || 'amazon_music'; // latest.fields のキー
 
-const ENDPOINTS_RAW = (process.env.ENDPOINTS || "").trim();
-const ENDPOINTS = ENDPOINTS_RAW
-  ? ENDPOINTS_RAW.split(",").map(s => s.trim()).filter(Boolean)
-  : [
-      "https://hossy.org/wp-json/agent/v1/meta",
-      "https://hossy.org/wp-json/agent/v1/meta/"
-    ];
+// YouTube
+const YT_FEED_URL = process.env.YT_FEED_URL || ''; // https://www.youtube.com/feeds/videos.xml?...
+const FIELD_KEY_YOUTUBE =
+  process.env.FIELD_KEY_YOUTUBE || process.env.FIELD_KEY || '';
+const META_KEY_YOUTUBE = process.env.META_KEY_YOUTUBE || 'youtube';
 
-function finish(obj) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
-  process.exit(0);
-}
-function fail(msg = "Amazon Music page could not be loaded") {
-  finish({ error: msg });
-}
+// Apple Podcasts
+const ITUNES_LOOKUP_URL =
+  process.env.ITUNES_LOOKUP_URL ||
+  'https://itunes.apple.com/lookup?id=1810690058&entity=podcastEpisode';
+const FIELD_KEY_ITUNES =
+  process.env.FIELD_KEY_ITUNES || process.env.FIELD_KEY || '';
+const META_KEY_ITUNES = process.env.META_KEY_ITUNES || 'itunes';
 
-if (!CHANNEL_URL) fail("CHANNEL_URL missing");
-if (!WP_USER || !WP_PASS) fail("WP credentials missing");
+// Spotify
+const SPOTIFY_SHOW_URL = process.env.SPOTIFY_SHOW_URL || ''; // https://open.spotify.com/show/...
+const FIELD_KEY_SPOTIFY =
+  process.env.FIELD_KEY_SPOTIFY || process.env.FIELD_KEY || '';
+const META_KEY_SPOTIFY = process.env.META_KEY_SPOTIFY || 'spotify';
 
-function pickUpdated(obj) {
-  const meta = (obj && obj.meta) || {};
-  if (typeof (obj && obj.updated) === "boolean") return obj.updated;
-  if (typeof meta.updated === "boolean") return meta.updated;
-  if (typeof meta.skipped === "boolean") return meta.skipped === false;
-  return false;
-}
-function pickReason(obj) {
-  const meta = (obj && obj.meta) || {};
-  return (obj && (obj.reason || obj.skipped_reason)) || meta.reason || meta.skipped_reason || null;
-}
-function asPlatform(name, episode_url, srcObj) {
-  const updated = pickUpdated(srcObj);
-  const reason = pickReason(srcObj);
-  const o = { name, episode_url, updated };
-  if (reason) o.skipped_reason = reason;
-  return o;
-}
+// エピソード番号期待値（ハードコード 1 を維持）
+// 必要になったら EXPECTED_EPISODE 環境変数で上書き可能
+const HARDCODE_EXPECTED =
+  process.env.EXPECTED_EPISODE != null
+    ? Number(process.env.EXPECTED_EPISODE)
+    : 1;
 
-// Helper to POST update to WP for a specific fieldKey/value/postId
-async function postToWP(fieldKey, value, postId, skipIfExists = true) {
-  if (!fieldKey) return { skipped: true, reason: "no_field_key" };
-  if (!value)    return { skipped: true, reason: "no_value" };
-  const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
-  const baseBody = { field: fieldKey, value, is_acf: true, skip_if_exists: !!skipIfExists };
-  const body = postId ? { ...baseBody, post_id: postId } : baseBody;
-  let last = { skipped: true, reason: "no_endpoint" };
-  for (const url of ENDPOINTS) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          Accept: "application/json",
-          Authorization: auth,
-        },
-        body: JSON.stringify(body),
-      });
-      const text = await res.text();
-      try { last = JSON.parse(text); } catch { last = { raw: text }; }
-      // normalize result shape for mail/jq
-      if (last && typeof last === "object") {
-        const meta = last.meta || {};
-        if (typeof last.skipped === "boolean" && typeof meta.skipped !== "boolean") meta.skipped = last.skipped;
-        if ((last.reason || last.skipped_reason) && !meta.reason) meta.reason = last.reason || last.skipped_reason;
-        if (typeof last.updated !== "boolean" && typeof meta.skipped === "boolean") last.updated = (meta.skipped === false);
-        last.meta = meta;
-      }
-      if (res.ok) break;
-    } catch (e) {
-      last = { skipped: true, reason: String(e && e.message ? e.message : e) };
-    }
+// ----------------------------------------------------------------------------
+// 共通ヘルパ
+// ----------------------------------------------------------------------------
+
+function basicAuthHeader() {
+  if (!WP_USER || !WP_PASS) {
+    throw new Error('WP_USER / WP_PASS が設定されていません');
   }
-  return last;
+  const token = Buffer.from(`${WP_USER}:${WP_PASS}`).toString('base64');
+  return 'Basic ' + token;
 }
 
-function episodeNumFromTitle(t) {
-  if (!t || typeof t !== "string") return null;
-  const m = t.match(/^\s*Episode\s*(\d+)/i);
-  return m ? Number(m[1]) : null;
+async function getJson(url) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${url} failed: ${res.status}`);
+  }
+  return res.json();
 }
+
+async function postMeta({ field, value, isAcf = true, skipIfExists = true }) {
+  const body = {
+    field,
+    value,
+    is_acf: !!isAcf,
+    skip_if_exists: !!skipIfExists,
+  };
+
+  const res = await fetch(META_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Accept: 'application/json',
+      Authorization: basicAuthHeader(),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    return {
+      ok: false,
+      updated: false,
+      skipped: false,
+      reason: 'invalid_json',
+      raw: text,
+    };
+  }
+
+  if (!res.ok || json.ok === false) {
+    return {
+      ok: false,
+      updated: false,
+      skipped: !!json.skipped,
+      reason: json.reason || 'update_failed',
+      meta: json.meta || null,
+    };
+  }
+
+  return {
+    ok: true,
+    updated: !!json.updated,
+    skipped: !!json.skipped,
+    reason: json.reason || null,
+    meta: json.meta || null,
+  };
+}
+
+function pickExistingUrl(fields, key) {
+  if (!fields || typeof fields !== 'object') return '';
+  const v = fields[key];
+  if (!v) return '';
+  if (typeof v === 'string') return v.trim();
+  if (typeof v.url === 'string') return v.url.trim();
+  if (typeof v.value === 'string') return v.value.trim();
+  return '';
+}
+
+function isValidUrl(u) {
+  return typeof u === 'string' && /^https?:\/\//i.test(u);
+}
+
+function episodeNumFromTitle(title) {
+  if (!title || typeof title !== 'string') return null;
+  // 例: "Episode 28｜..." "エピソード28" などから数値抜き出し
+  const m = title.match(/(?:Episode|エピソード)[^\d]*(\d+)/i);
+  if (m) return Number(m[1]);
+  // 後ろの「28｜」だけ拾う保険
+  const m2 = title.match(/(\d+)[^\d]*$/);
+  if (m2) return Number(m2[1]);
+  return null;
+}
+
 function episodeNumFromUrl(u) {
-  if (!u || typeof u !== "string") return null;
-  const dec = decodeURIComponent(u);
-  const m = dec.match(/episode[\s\-_/]*([0-9]{1,4})/i);
-  return m ? Number(m[1]) : null;
-}
-function computeMatched(need, actual, expected, bootstrap) {
-  // If the platform URL already exists, we want matched = null ("--")
-  if (!need) return null;
-  // When expected is not available (bootstrap run), fall back to a bootstrap value (e.g., Amazon first card number)
-  const exp = expected != null ? expected : bootstrap;
-  if (exp == null || actual == null) return false;
-  return actual === exp;
+  if (!u || typeof u !== 'string') return null;
+  const m = u.match(/episode[-/](\d+)/i);
+  if (m) return Number(m[1]);
+  return null;
 }
 
-async function getJson(url, timeoutMs = 15000) {
-  const ac = new AbortController();
-  const id = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { signal: ac.signal, headers: { Accept: "*/*" } });
-    const text = await r.text();
-    let data = null;
-    try {
-      data = JSON.parse(text);
-    } catch {}
-    return { ok: r.ok, status: r.status, text, json: data };
-  } catch (e) {
-    return { ok: false, status: 0, text: String(e), json: null };
-  } finally {
-    clearTimeout(id);
-  }
-}
-async function getText(url, timeoutMs = 15000) {
-  const ac = new AbortController();
-  const id = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { signal: ac.signal, headers: { Accept: "text/html,*/*" } });
-    const text = await r.text();
-    return { ok: r.ok, status: r.status, text };
-  } catch (e) {
-    return { ok: false, status: 0, text: String(e) };
-  } finally {
-    clearTimeout(id);
-  }
+function computeMatched(need, expected, actual) {
+  if (!need) return null; // 既存URLあり → "--"
+  if (expected == null || actual == null) return null; // 判定不能 → "--"
+  return actual === expected;
 }
 
-(async () => {
-  let browser;
+// ----------------------------------------------------------------------------
+// 各PF取得
+// ----------------------------------------------------------------------------
+
+async function fetchAmazonLatest(context) {
+  if (!AMAZON_CHANNEL_URL) {
+    return { url: null, title: null, episodeNum: null, error: 'no_channel_url' };
+  }
+
+  const page = await context.newPage();
   try {
-    // ① Amazon placeholders (will be filled only if needAmazon)
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({
-      locale: "ja-JP",
-      timezoneId: "Asia/Tokyo",
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    await page.goto(AMAZON_CHANNEL_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 90000,
     });
-    // Amazon placeholders (will be filled only if needAmazon)
-    let episode_url = null; // Amazon episode URL candidate
-    let amazonTitle = null;
-    let amazonActual = null;
+    await page.waitForLoadState('networkidle', { timeout: 60000 });
 
-    // ② hossy.org 側の期待エピソード & 既存のプラットフォームURL
-    const cacheBust = Date.now();
-    const latestSite = await getJson(`https://hossy.org/wp-json/agent/v1/latest?t=${cacheBust}`);
-    const expectedEpisode = latestSite && latestSite.json ? latestSite.json.episode_num : null;
-    //const expectedEpisode = 1;
-    const targetTitle = latestSite && latestSite.json ? latestSite.json.title : null;
-    const targetUrl = latestSite && latestSite.json ? latestSite.json.url : null;
-    const targetPostId = latestSite && latestSite.json ? latestSite.json.post_id : null;
-    const existingFields = latestSite && latestSite.json ? latestSite.json.fields : null;
+    const item = page.locator('music-episode-row-item').first();
+    if (!(await item.count())) {
+      return { url: null, title: null, episodeNum: null, error: 'no_episode_item' };
+    }
 
-    function pickUrlField(fields, keys) {
-      if (!fields || typeof fields !== "object") return "";
-      for (const k of keys) {
-        const v = fields[k];
-        let s = null;
-        if (!v) continue;
-        if (typeof v === "string") s = v;
-        else if (typeof v.url === "string") s = v.url;
-        else if (typeof v.value === "string") s = v.value;
-        if (typeof s === "string") {
-          s = s.trim();
-          if (!s || s === "null" || s === "undefined") continue;
-          return s;
-        }
+    let href = await item.getAttribute('primary-href');
+    if (!href) {
+      const link = item.locator('a[href*="/episodes/"]').first();
+      if (await link.count()) href = await link.getAttribute('href');
+    }
+    if (!href) {
+      return { url: null, title: null, episodeNum: null, error: 'no_href' };
+    }
+    if (href.startsWith('/')) {
+      const { origin } = new URL(AMAZON_CHANNEL_URL);
+      href = origin + href;
+    }
+
+    // タイトル推測
+    let title = null;
+    const attrTitle = await item.getAttribute('primary-text');
+    if (attrTitle && attrTitle.trim()) title = attrTitle.trim();
+
+    if (!title) {
+      const titleNode = item
+        .locator('[slot="title"], .title, [data-testid="title"]')
+        .first();
+      if (await titleNode.count()) {
+        const t = (await titleNode.innerText()).trim();
+        if (t) title = t;
       }
-      return "";
     }
 
-    // 既存のプラットフォームURLをチェック
-    const existingAmazon = pickUrlField(existingFields, ["amazon_music", "amazon", "amazon_music_url"]);
-    const existingYouTube = pickUrlField(existingFields, ["youtube", "yt", "youtube_url"]);
-    const existingItunes = pickUrlField(existingFields, ["itunes", "apple_podcasts", "itunes_url", "apple_podcasts_url"]);
-    const existingSpotify = pickUrlField(existingFields, ["spotify", "spotify_url"]);
-
-    // どのプラットフォームを取得する必要があるか判定
-    const needAmazon = !(existingAmazon && /^https?:\/\//.test(existingAmazon));
-    const needYouTube = !(existingYouTube && /^https?:\/\//.test(existingYouTube));
-    const needItunes = !(existingItunes && /^https?:\/\//.test(existingItunes));
-    const needSpotify = !(existingSpotify && /^https?:\/\//.test(existingSpotify));
-
-    // ① Amazon Music の最初の横長カードから URL 取得（必要な場合のみ）
-    if (needAmazon) {
-      try {
-        const page = await context.newPage();
-        await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
-        await page.waitForLoadState("networkidle", { timeout: 60000 });
-        const item = page.locator("music-episode-row-item").first();
-        if (!(await item.count())) return fail();
-        let href = await item.getAttribute("primary-href");
-        if (!href) {
-          const link = item.locator('a[href*="/episodes/"]').first();
-          if (await link.count()) href = await link.getAttribute("href");
-        }
-        if (!href) return fail();
-        if (href.startsWith("/")) {
-          const { origin } = new URL(CHANNEL_URL);
-          href = origin + href;
-        }
-        episode_url = href;
-        // タイトル推測
-        try {
-          const attrTitle = await item.getAttribute("primary-text");
-          if (attrTitle && attrTitle.trim()) amazonTitle = attrTitle.trim();
-          if (!amazonTitle) {
-            const titleNode = item.locator('[slot="title"], .title, [data-testid="title"]').first();
-            if (await titleNode.count()) {
-              const t = (await titleNode.innerText()).trim();
-              if (t) amazonTitle = t;
-            }
-          }
-          if (!amazonTitle) {
-            const raw = await item.evaluate((el) => (el.textContent || "").trim());
-            if (raw) amazonTitle = raw.split("\n").map((s) => s.trim()).filter(Boolean)[0] || raw.replace(/\s+/g, " ");
-          }
-        } catch {}
-        amazonActual = episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url);
-        await page.close();
-      } catch {}
-    }
-    // 整合性チェック（Amazon Music）
-    const amazonMatched = expectedEpisode == null ? true : amazonActual === expectedEpisode;
-
-    // ③ 他PFの軽量取得（必要なプラットフォームのみ）
-    let ytTitle = null,
-      itTitle = null,
-      spTitle = null;
-    let ytUrl = null, itUrl = null, spUrl = null;
-    // YouTube の取得（必要な場合のみ）
-    if (needYouTube) {
-      try {
-        const r = await getText(YT_FEED_URL);
-        if (r.ok) {
-          const m = r.text.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/i);
-          if (m) ytTitle = m[1];
-          // Extract YouTube episode URL from feed
-          const mLink = r.text.match(/<entry>[\s\S]*?<link[^>]*href=\"([^\"]+)\"/i);
-          if (mLink) ytUrl = mLink[1];
-        }
-      } catch {}
-    }
-    // iTunes の取得（必要な場合のみ）
-    if (needItunes) {
-      try {
-        const r = await getJson(ITUNES_LOOKUP_URL);
-        if (r.ok && r.json && Array.isArray(r.json.results)) {
-          const ep = r.json.results.find((x) => x.wrapperType === "podcastEpisode");
-          var itUrlTemp = null;
-          if (ep) {
-            itTitle = ep.trackName || ep.collectionName || null;
-            itUrlTemp = ep.trackViewUrl || null;
-          }
-          itUrl = itUrlTemp;
-        }
-      } catch {}
-    }
-    // Spotify の取得（必要な場合のみ）
-    if (needSpotify) {
-      try {
-        const spPage = await context.newPage();
-        await spPage.goto(`https://open.spotify.com/show/${SPOTIFY_SHOW_ID}`, {
-          waitUntil: "domcontentloaded",
-          timeout: 90000,
-        });
-        await spPage.waitForLoadState("networkidle", { timeout: 60000 });
-        const firstEp = spPage.locator('a[href^="/episode/"]').first();
-        if (await firstEp.count()) {
-          const href = await firstEp.getAttribute("href");
-          if (href) {
-            const { origin } = new URL("https://open.spotify.com");
-            spUrl = origin + href;
-          }
-          const container = firstEp.locator("xpath=ancestor-or-self::*[1]");
-          spTitle = (await container.innerText()).split("\n").filter(Boolean)[0] || null;
-        }
-        await spPage.close();
-      } catch {}
+    if (!title) {
+      const raw = await item.evaluate(el => (el.textContent || '').trim());
+      if (raw) {
+        title = raw
+          .split('\n')
+          .map(s => s.trim())
+          .filter(Boolean)[0];
+      }
     }
 
-    // ④ 各PFを独立で WP 更新
-    let resultAmazon = null, resultYouTube = null, resultItunes = null, resultSpotify = null;
-    const postId = targetPostId || POST_ID;
+    const episodeNum = episodeNumFromTitle(title) ?? episodeNumFromUrl(href);
+
+    return { url: href, title, episodeNum, error: null };
+  } finally {
+    await page.close();
+  }
+}
+
+async function fetchYouTubeLatest() {
+  if (!YT_FEED_URL) {
+    return { url: null, title: null, episodeNum: null, error: 'no_feed_url' };
+  }
+  const res = await fetch(YT_FEED_URL);
+  if (!res.ok) {
+    return {
+      url: null,
+      title: null,
+      episodeNum: null,
+      error: `http_${res.status}`,
+    };
+  }
+  const xml = await res.text();
+  const entryMatch = xml.match(/<entry>[\s\S]*?<\/entry>/i);
+  if (!entryMatch) {
+    return { url: null, title: null, episodeNum: null, error: 'no_entry' };
+  }
+  const entry = entryMatch[0];
+  const linkMatch = entry.match(
+    /<link[^>]*href=\"([^\"]+)\"[^>]*rel=\"alternate\"/i
+  );
+  const titleMatch = entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+
+  const url = linkMatch ? linkMatch[1] : null;
+  const rawTitle = titleMatch ? titleMatch[1] : null;
+  const title = rawTitle ? rawTitle.replace(/\s+/g, ' ').trim() : null;
+  const episodeNum = episodeNumFromTitle(title) ?? episodeNumFromUrl(url);
+
+  return { url, title, episodeNum, error: null };
+}
+
+async function fetchItunesLatest() {
+  const res = await fetch(ITUNES_LOOKUP_URL);
+  if (!res.ok) {
+    return {
+      url: null,
+      title: null,
+      episodeNum: null,
+      error: `http_${res.status}`,
+    };
+  }
+  const json = await res.json();
+  const results = json.results || [];
+  const ep = results.find(r => r.wrapperType === 'podcastEpisode') || results[1];
+  if (!ep) {
+    return { url: null, title: null, episodeNum: null, error: 'no_episode' };
+  }
+  const url = ep.trackViewUrl || null;
+  const title = ep.trackName || ep.collectionName || null;
+  const episodeNum = episodeNumFromTitle(title) ?? episodeNumFromUrl(url);
+  return { url, title, episodeNum, error: null };
+}
+
+async function fetchSpotifyLatest(context) {
+  if (!SPOTIFY_SHOW_URL) {
+    return { url: null, title: null, episodeNum: null, error: 'no_show_url' };
+  }
+
+  const page = await context.newPage();
+  try {
+    await page.goto(SPOTIFY_SHOW_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 90000,
+    });
+    await page.waitForLoadState('networkidle', { timeout: 60000 });
+
+    const firstEp = page.locator('a[href*="/episode/"]').first();
+    if (!(await firstEp.count())) {
+      return { url: null, title: null, episodeNum: null, error: 'no_episode_link' };
+    }
+
+    const href = await firstEp.getAttribute('href');
+    const { origin } = new URL(SPOTIFY_SHOW_URL);
+    const url = href.startsWith('http') ? href : origin + href;
+
+    const container = firstEp.locator('xpath=ancestor-or-self::*[1]');
+    const rawText = (await container.innerText()).trim();
+    const title = rawText.split('\n').filter(Boolean)[0] || rawText;
+    const episodeNum = episodeNumFromTitle(title) ?? episodeNumFromUrl(url);
+
+    return { url, title, episodeNum, error: null };
+  } finally {
+    await page.close();
+  }
+}
+
+// ----------------------------------------------------------------------------
+// メイン
+// ----------------------------------------------------------------------------
+
+async function main() {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+
+  try {
+    // 1) 最新投稿 & 既存フィールド取得
+    const latest = await getJson(
+      `${LATEST_ENDPOINT}?t=${Date.now().toString()}`
+    );
+    if (!latest.ok) throw new Error('latest endpoint error');
+
+    const postId = latest.post_id;
+    const targetTitle = latest.title;
+    const targetUrl = latest.url;
+    const fields = latest.fields || {};
+    const expectedEpisode = HARDCODE_EXPECTED;
+
+    // 既存URL
+    const existingAmazon = pickExistingUrl(fields, META_KEY_AMAZON);
+    const existingYouTube = pickExistingUrl(fields, META_KEY_YOUTUBE);
+    const existingItunes = pickExistingUrl(fields, META_KEY_ITUNES);
+    const existingSpotify = pickExistingUrl(fields, META_KEY_SPOTIFY);
+
+    const needAmazon = !isValidUrl(existingAmazon);
+    const needYouTube = !isValidUrl(existingYouTube);
+    const needItunes = !isValidUrl(existingItunes);
+    const needSpotify = !isValidUrl(existingSpotify);
+
     // Amazon
-    if (!needAmazon) {
-      resultAmazon = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
-    } else if (amazonActual == null || expectedEpisode == null ? false : amazonActual !== expectedEpisode) {
-      resultAmazon = { updated: false, skipped_reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`, post_id: postId, meta: { skipped: true, reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})` } };
-    } else {
-      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ !needAmazon);
-    }
-    // YouTube
-    if (!needYouTube) {
-      resultYouTube = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
-    } else if (episodeNumFromTitle(ytTitle) == null && expectedEpisode != null) {
-      resultYouTube = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
-    } else {
-      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ !needYouTube);
-    }
-    // iTunes
-    if (!needItunes) {
-      resultItunes = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
-    } else if (episodeNumFromTitle(itTitle) == null && expectedEpisode != null) {
-      resultItunes = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
-    } else {
-      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ !needItunes);
-    }
-    // Spotify
-    if (!needSpotify) {
-      resultSpotify = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
-    } else if (episodeNumFromTitle(spTitle) == null && expectedEpisode != null) {
-      resultSpotify = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
-    } else {
-      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ !needSpotify);
+    let amazonData = { url: existingAmazon, title: null, episodeNum: null, error: null };
+    let amazonMetaResult = {
+      updated: false,
+      skipped: !needAmazon,
+      reason: needAmazon ? null : 'already_has_value',
+    };
+
+    if (needAmazon) {
+      amazonData = await fetchAmazonLatest(context);
+      if (amazonData.url && FIELD_KEY_AMAZON) {
+        amazonMetaResult = await postMeta({
+          field: FIELD_KEY_AMAZON,
+          value: amazonData.url,
+          isAcf: true,
+          skipIfExists: false,
+        });
+      }
     }
 
-    // ⑤ platforms
-    const matched_post_id = postId;
-    const platforms = [];
+    const amazonMatched = computeMatched(
+      needAmazon,
+      expectedEpisode,
+      amazonData.episodeNum
+    );
 
-    // Amazon Music
-    let amazonPlatform = {
-      name: "amazon_music",
-      episode_url: needAmazon ? episode_url : existingAmazon,
-      updated: pickUpdated(resultAmazon)
+    const amazonPlatform = {
+      name: 'amazon_music',
+      episode_url: amazonData.url || existingAmazon || null,
+      updated: !!amazonMetaResult.updated,
+      skipped_reason: amazonMetaResult.skipped
+        ? amazonMetaResult.reason || 'already_has_value'
+        : null,
+      coherence: {
+        expected: expectedEpisode,
+        actual: needAmazon ? amazonData.episodeNum : null,
+        title: needAmazon ? amazonData.title : null,
+        matched: amazonMatched,
+      },
     };
-    const amazonReason = pickReason(resultAmazon);
-    if (amazonReason) amazonPlatform.skipped_reason = amazonReason;
-    if (!amazonReason && !pickUpdated(resultAmazon)) amazonPlatform.skipped_reason = (!needAmazon) ? "already_has_value" : "unknown";
-    const amazonWasSkipped = (pickUpdated(resultAmazon) === false) && !!(pickReason(resultAmazon) || amazonPlatform.skipped_reason);
-    // Final override: if already registered, force mail to show already_has_value and no coherence
-    if (!needAmazon) {
-      amazonPlatform.updated = false;
-      amazonPlatform.skipped_reason = "already_has_value";
-    }
-    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
-    if (!amazonPlatform.updated && !amazonPlatform.skipped_reason) {
-      amazonPlatform.skipped_reason = "already_has_value";
-    }
-    amazonPlatform.coherence = {
-      expected: expectedEpisode,
-      actual: needAmazon ? amazonActual : null,
-      title: needAmazon ? amazonTitle : null,
-      matched: (!needAmazon || amazonWasSkipped)
-        ? null
-        : computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual)
-    };
-    platforms.push(amazonPlatform);
 
     // YouTube
-    let ytObj = {
-      name: "youtube",
-      episode_url: needYouTube ? ytUrl : existingYouTube,
-      updated: pickUpdated(resultYouTube)
+    let ytData = { url: existingYouTube, title: null, episodeNum: null, error: null };
+    let ytMetaResult = {
+      updated: false,
+      skipped: !needYouTube,
+      reason: needYouTube ? null : 'already_has_value',
     };
-    const ytReason = pickReason(resultYouTube);
-    if (ytReason) ytObj.skipped_reason = ytReason;
-    if (!ytReason && !pickUpdated(resultYouTube)) ytObj.skipped_reason = (!needYouTube) ? "already_has_value" : "unknown";
-    const ytWasSkipped = (pickUpdated(resultYouTube) === false) && !!(pickReason(resultYouTube) || ytObj.skipped_reason);
-    if (!needYouTube) {
-      ytObj.updated = false;
-      ytObj.skipped_reason = "already_has_value";
+
+    if (needYouTube) {
+      ytData = await fetchYouTubeLatest();
+      if (ytData.url && FIELD_KEY_YOUTUBE) {
+        ytMetaResult = await postMeta({
+          field: FIELD_KEY_YOUTUBE,
+          value: ytData.url,
+          isAcf: true,
+          skipIfExists: false,
+        });
+      }
     }
-    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
-    if (!ytObj.updated && !ytObj.skipped_reason) {
-      ytObj.skipped_reason = "already_has_value";
-    }
-    ytObj.coherence = {
-      expected: expectedEpisode,
-      actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
-      title: needYouTube ? ytTitle : null,
-      matched: (!needYouTube || ytWasSkipped)
-        ? null
-        : computeMatched(needYouTube, episodeNumFromTitle(ytTitle), expectedEpisode, amazonActual)
+
+    const ytMatched = computeMatched(
+      needYouTube,
+      expectedEpisode,
+      ytData.episodeNum
+    );
+
+    const ytPlatform = {
+      name: 'youtube',
+      episode_url: ytData.url || existingYouTube || null,
+      updated: !!ytMetaResult.updated,
+      skipped_reason: ytMetaResult.skipped
+        ? ytMetaResult.reason || 'already_has_value'
+        : null,
+      coherence: {
+        expected: expectedEpisode,
+        actual: needYouTube ? ytData.episodeNum : null,
+        title: needYouTube ? ytData.title : null,
+        matched: ytMatched,
+      },
     };
-    platforms.push(ytObj);
 
     // iTunes
-    let itObj = {
-      name: "itunes",
-      episode_url: needItunes ? itUrl : existingItunes,
-      updated: pickUpdated(resultItunes)
+    let itData = { url: existingItunes, title: null, episodeNum: null, error: null };
+    let itMetaResult = {
+      updated: false,
+      skipped: !needItunes,
+      reason: needItunes ? null : 'already_has_value',
     };
-    const itReason = pickReason(resultItunes);
-    if (itReason) itObj.skipped_reason = itReason;
-    if (!itReason && !pickUpdated(resultItunes)) itObj.skipped_reason = (!needItunes) ? "already_has_value" : "unknown";
-    const itWasSkipped = (pickUpdated(resultItunes) === false) && !!(pickReason(resultItunes) || itObj.skipped_reason);
-    if (!needItunes) {
-      itObj.updated = false;
-      itObj.skipped_reason = "already_has_value";
+
+    if (needItunes) {
+      itData = await fetchItunesLatest();
+      if (itData.url && FIELD_KEY_ITUNES) {
+        itMetaResult = await postMeta({
+          field: FIELD_KEY_ITUNES,
+          value: itData.url,
+          isAcf: true,
+          skipIfExists: false,
+        });
+      }
     }
-    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
-    if (!itObj.updated && !itObj.skipped_reason) {
-      itObj.skipped_reason = "already_has_value";
-    }
-    itObj.coherence = {
-      expected: expectedEpisode,
-      actual: needItunes ? episodeNumFromTitle(itTitle) : null,
-      title: needItunes ? itTitle : null,
-      matched: (!needItunes || itWasSkipped)
-        ? null
-        : computeMatched(needItunes, episodeNumFromTitle(itTitle), expectedEpisode, amazonActual)
+
+    const itMatched = computeMatched(
+      needItunes,
+      expectedEpisode,
+      itData.episodeNum
+    );
+
+    const itPlatform = {
+      name: 'itunes',
+      episode_url: itData.url || existingItunes || null,
+      updated: !!itMetaResult.updated,
+      skipped_reason: itMetaResult.skipped
+        ? itMetaResult.reason || 'already_has_value'
+        : null,
+      coherence: {
+        expected: expectedEpisode,
+        actual: needItunes ? itData.episodeNum : null,
+        title: needItunes ? itData.title : null,
+        matched: itMatched,
+      },
     };
-    platforms.push(itObj);
 
     // Spotify
-    let spObj = {
-      name: "spotify",
-      episode_url: needSpotify ? spUrl : existingSpotify,
-      updated: pickUpdated(resultSpotify)
+    let spData = { url: existingSpotify, title: null, episodeNum: null, error: null };
+    let spMetaResult = {
+      updated: false,
+      skipped: !needSpotify,
+      reason: needSpotify ? null : 'already_has_value',
     };
-    const spReason = pickReason(resultSpotify);
-    if (spReason) spObj.skipped_reason = spReason;
-    if (!spReason && !pickUpdated(resultSpotify)) spObj.skipped_reason = (!needSpotify) ? "already_has_value" : "unknown";
-    const spWasSkipped = (pickUpdated(resultSpotify) === false) && !!(pickReason(resultSpotify) || spObj.skipped_reason);
-    if (!needSpotify) {
-      spObj.updated = false;
-      spObj.skipped_reason = "already_has_value";
-    }
-    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
-    if (!spObj.updated && !spObj.skipped_reason) {
-      spObj.skipped_reason = "already_has_value";
-    }
-    spObj.coherence = {
-      expected: expectedEpisode,
-      actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
-      title: needSpotify ? spTitle : null,
-      matched: (!needSpotify || spWasSkipped)
-        ? null
-        : computeMatched(needSpotify, episodeNumFromTitle(spTitle), expectedEpisode, amazonActual)
-    };
-    platforms.push(spObj);
 
-    // ⑥ 出力（デバッグ情報付き）
-    finish({
-      matched_post_id,
+    if (needSpotify) {
+      spData = await fetchSpotifyLatest(context);
+      if (spData.url && FIELD_KEY_SPOTIFY) {
+        spMetaResult = await postMeta({
+          field: FIELD_KEY_SPOTIFY,
+          value: spData.url,
+          isAcf: true,
+          skipIfExists: false,
+        });
+      }
+    }
+
+    const spMatched = computeMatched(
+      needSpotify,
+      expectedEpisode,
+      spData.episodeNum
+    );
+
+    const spPlatform = {
+      name: 'spotify',
+      episode_url: spData.url || existingSpotify || null,
+      updated: !!spMetaResult.updated,
+      skipped_reason: spMetaResult.skipped
+        ? spMetaResult.reason || 'already_has_value'
+        : null,
+      coherence: {
+        expected: expectedEpisode,
+        actual: needSpotify ? spData.episodeNum : null,
+        title: needSpotify ? spData.title : null,
+        matched: spMatched,
+      },
+    };
+
+    const resultJson = {
+      matched_post_id: postId,
       target_title: targetTitle,
       target_url: targetUrl,
-      platforms,
+      platforms: [amazonPlatform, ytPlatform, itPlatform, spPlatform],
       debug: {
+        expectedEpisode,
         needAmazon,
         needYouTube,
         needItunes,
         needSpotify,
-        existingAmazon: existingAmazon || "(empty)",
-        existingYouTube: existingYouTube || "(empty)",
-        existingItunes: existingItunes || "(empty)",
-        existingSpotify: existingSpotify || "(empty)"
-      }
-    });
-  } catch (e) {
-    fail(String(e && e.message ? e.message : e));
+        existingAmazon,
+        existingYouTube,
+        existingItunes,
+        existingSpotify,
+        amazonData,
+        ytData,
+        itData,
+        spData,
+      },
+    };
+
+    // GitHub Actions のメール整形側が読む前提の JSON 出力
+    console.log(JSON.stringify(resultJson, null, 2));
   } finally {
-    if (browser) await browser.close();
+    await context.close();
+    await browser.close();
   }
-})();
+}
+
+main().catch(err => {
+  console.error('Script failed:', err);
+  process.exit(1);
+});
