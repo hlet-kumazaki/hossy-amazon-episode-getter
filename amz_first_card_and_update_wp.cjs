@@ -278,8 +278,15 @@ async function getText(url, timeoutMs = 15000) {
         skipped_reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})` 
       };
     } else {
-      // 新規取得して更新
-      amazonPlatform = asPlatform("amazon_music", episode_url, resultJson);
+      // 新規取得して更新（WordPress APIのレスポンスから必要な情報のみ取得）
+      const wpUpdated = pickUpdated(resultJson);
+      const wpReason = pickReason(resultJson);
+      amazonPlatform = { 
+        name: "amazon_music", 
+        episode_url: episode_url,
+        updated: wpUpdated
+      };
+      if (wpReason) amazonPlatform.skipped_reason = wpReason;
     }
     
     amazonPlatform.coherence = {
@@ -305,9 +312,20 @@ async function getText(url, timeoutMs = 15000) {
       };
     } else if (yt) {
       const yt_url = yt.episode_url || yt.url || yt.value || yt.link || null;
-      ytObj = asPlatform("youtube", yt_url, yt);
+      const ytUpdated = pickUpdated(yt);
+      const ytReason = pickReason(yt);
+      ytObj = { 
+        name: "youtube", 
+        episode_url: yt_url,
+        updated: ytUpdated
+      };
+      if (ytReason) ytObj.skipped_reason = ytReason;
     } else {
-      ytObj = asPlatform("youtube", null, yt || {});
+      ytObj = { 
+        name: "youtube", 
+        episode_url: null,
+        updated: false
+      };
     }
     
     ytObj.coherence = {
@@ -337,9 +355,20 @@ async function getText(url, timeoutMs = 15000) {
       };
     } else if (it) {
       const it_url = it.episode_url || it.url || it.value || it.link || null;
-      itObj = asPlatform("itunes", it_url, it);
+      const itUpdated = pickUpdated(it);
+      const itReason = pickReason(it);
+      itObj = { 
+        name: "itunes", 
+        episode_url: it_url,
+        updated: itUpdated
+      };
+      if (itReason) itObj.skipped_reason = itReason;
     } else {
-      itObj = asPlatform("itunes", null, it || {});
+      itObj = { 
+        name: "itunes", 
+        episode_url: null,
+        updated: false
+      };
     }
     
     itObj.coherence = {
@@ -368,9 +397,22 @@ async function getText(url, timeoutMs = 15000) {
         updated: false, 
         skipped_reason: "URL already exists" 
       };
-    } else {
+    } else if (sp) {
       const sp_url = (sp && (sp.episode_url || sp.url || sp.value || sp.link)) || null;
-      spObj = asPlatform("spotify", sp_url, sp || sp_wrap);
+      const spUpdated = pickUpdated(sp);
+      const spReason = pickReason(sp);
+      spObj = { 
+        name: "spotify", 
+        episode_url: sp_url,
+        updated: spUpdated
+      };
+      if (spReason) spObj.skipped_reason = spReason;
+    } else {
+      spObj = { 
+        name: "spotify", 
+        episode_url: null,
+        updated: false
+      };
     }
     
     spObj.coherence = {
