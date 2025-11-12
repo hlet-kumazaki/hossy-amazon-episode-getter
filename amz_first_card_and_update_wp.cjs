@@ -160,6 +160,9 @@ async function getText(url, timeoutMs = 15000) {
     } catch {}
 
     const amazonActual = episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url);
+    
+    // 整合性チェック（Amazon Music）
+    const amazonMatched = expectedEpisode == null ? true : amazonActual === expectedEpisode;
 
     // ③ 他PFの軽量取得（必要なプラットフォームのみ）
     let ytTitle = null,
@@ -206,11 +209,26 @@ async function getText(url, timeoutMs = 15000) {
       } catch {}
     }
 
-    // ④ WP 更新（Amazon Music が必要な場合のみ）
+    // ④ WP 更新（Amazon Music が必要で、整合性チェックがマッチした場合のみ）
     const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
     let resultJson = null;
     
-    if (needAmazon) {
+    if (!needAmazon) {
+      // Amazon Musicが既に存在する場合はスキップ
+      resultJson = { 
+        skipped: true, 
+        reason: "Amazon Music URL already exists",
+        post_id: targetPostId || POST_ID
+      };
+    } else if (!amazonMatched) {
+      // 整合性チェックがマッチしない場合はスキップ
+      resultJson = { 
+        skipped: true, 
+        reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`,
+        post_id: targetPostId || POST_ID
+      };
+    } else {
+      // 整合性チェックがマッチした場合のみ更新
       const baseBody = { field: FIELD_KEY, value: episode_url, is_acf: true, skip_if_exists: true };
       const body = POST_ID ? { ...baseBody, post_id: POST_ID } : baseBody;
 
@@ -234,13 +252,6 @@ async function getText(url, timeoutMs = 15000) {
           if (res.ok) break;
         } catch {}
       }
-    } else {
-      // Amazon Musicが既に存在する場合はスキップ
-      resultJson = { 
-        skipped: true, 
-        reason: "Amazon Music URL already exists",
-        post_id: targetPostId || POST_ID
-      };
     }
 
     // ⑤ platforms
@@ -248,17 +259,13 @@ async function getText(url, timeoutMs = 15000) {
     const platforms = [];
 
     // Amazon Music
-    const finalAmazonUrl = needAmazon ? episode_url : existingAmazon;
+    const finalAmazonUrl = (needAmazon && amazonMatched) ? episode_url : existingAmazon;
     const amazonPlatform = asPlatform("amazon_music", finalAmazonUrl, resultJson);
-    if (!needAmazon) {
-      amazonPlatform.skipped_reason = "URL already exists";
-      amazonPlatform.updated = false;
-    }
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: amazonActual,
       title: amazonTitle,
-      matched: expectedEpisode == null ? true : amazonActual === expectedEpisode,
+      matched: amazonMatched,
     };
     platforms.push(amazonPlatform);
 
