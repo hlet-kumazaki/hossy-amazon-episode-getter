@@ -320,7 +320,9 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
       title: needAmazon ? amazonTitle : null,
-      matched: computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual),
+      matched: (amazonPlatform && amazonPlatform.skipped_reason === "already_has_value")
+        ? null
+        : computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual),
     };
     platforms.push(amazonPlatform);
 
@@ -359,12 +361,14 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
       title: needYouTube ? ytTitle : null,
-      matched: computeMatched(
-        needYouTube,
-        episodeNumFromTitle(ytTitle),
-        expectedEpisode,
-        amazonActual
-      ),
+      matched: (ytObj && ytObj.skipped_reason === "already_has_value")
+        ? null
+        : computeMatched(
+            needYouTube,
+            episodeNumFromTitle(ytTitle),
+            expectedEpisode,
+            amazonActual
+          ),
     };
     platforms.push(ytObj);
 
@@ -402,12 +406,14 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
       title: needItunes ? itTitle : null,
-      matched: computeMatched(
-        needItunes,
-        episodeNumFromTitle(itTitle),
-        expectedEpisode,
-        amazonActual
-      ),
+      matched: (itObj && itObj.skipped_reason === "already_has_value")
+        ? null
+        : computeMatched(
+            needItunes,
+            episodeNumFromTitle(itTitle),
+            expectedEpisode,
+            amazonActual
+          ),
     };
     platforms.push(itObj);
 
@@ -446,12 +452,14 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
       title: needSpotify ? spTitle : null,
-      matched: computeMatched(
-        needSpotify,
-        episodeNumFromTitle(spTitle),
-        expectedEpisode,
-        amazonActual
-      ),
+      matched: (spObj && spObj.skipped_reason === "already_has_value")
+        ? null
+        : computeMatched(
+            needSpotify,
+            episodeNumFromTitle(spTitle),
+            expectedEpisode,
+            amazonActual
+          ),
     };
     platforms.push(spObj);
 
