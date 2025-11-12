@@ -5,9 +5,9 @@ const WP_USER = process.env.WP_USER;
 const WP_PASS = process.env.WP_PASS;
 const FIELD_KEY = process.env.FIELD_KEY || "field_680d867a57991";
 const FIELD_KEY_AMAZON = process.env.FIELD_KEY_AMAZON || FIELD_KEY; // backward compat
-const FIELD_KEY_YOUTUBE = process.env.FIELD_KEY_YOUTUBE || "";
-const FIELD_KEY_ITUNES  = process.env.FIELD_KEY_ITUNES  || "";
-const FIELD_KEY_SPOTIFY = process.env.FIELD_KEY_SPOTIFY || "";
+const FIELD_KEY_YOUTUBE = process.env.FIELD_KEY_YOUTUBE || FIELD_KEY;
+const FIELD_KEY_ITUNES  = process.env.FIELD_KEY_ITUNES  || FIELD_KEY;
+const FIELD_KEY_SPOTIFY = process.env.FIELD_KEY_SPOTIFY || FIELD_KEY;
 const POST_ID = process.env.POST_ID && String(process.env.POST_ID).trim();
 
 const YT_FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4vypjnhxhnyGERcqRGv5nA";
