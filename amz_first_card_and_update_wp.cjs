@@ -61,7 +61,7 @@ function episodeNumFromUrl(u) {
 }
 function computeMatched(need, actual, expected, bootstrap) {
   // If the platform URL already exists, we want matched = null ("--")
-  if (!need) return null;
+  if (!need) return "null";
   // When expected is not available (bootstrap run), fall back to a bootstrap value (e.g., Amazon first card number)
   const exp = expected != null ? expected : bootstrap;
   if (exp == null || actual == null) return false;
