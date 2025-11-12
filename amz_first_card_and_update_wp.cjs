@@ -121,13 +121,27 @@ async function getText(url, timeoutMs = 15000) {
     }
     const episode_url = href;
 
-    // ② hossy.org 側の期待エピソード
+    // ② hossy.org 側の期待エピソード & 既存のプラットフォームURL
     const latestSite = await getJson("https://hossy.org/wp-json/agent/v1/latest");
     const expectedEpisode = latestSite && latestSite.json ? latestSite.json.episode_num : null;
     const targetTitle = latestSite && latestSite.json ? latestSite.json.title : null;
     const targetUrl = latestSite && latestSite.json ? latestSite.json.url : null;
+    const targetPostId = latestSite && latestSite.json ? latestSite.json.post_id : null;
+    const existingFields = latestSite && latestSite.json ? latestSite.json.fields : null;
+    
+    // 既存のプラットフォームURLをチェック
+    const existingAmazon = existingFields && existingFields.amazon_music ? existingFields.amazon_music.trim() : "";
+    const existingYouTube = existingFields && existingFields.youtube ? existingFields.youtube.trim() : "";
+    const existingItunes = existingFields && existingFields.itunes ? existingFields.itunes.trim() : "";
+    const existingSpotify = existingFields && existingFields.spotify ? existingFields.spotify.trim() : "";
+    
+    // どのプラットフォームを取得する必要があるか判定
+    const needAmazon = !existingAmazon;
+    const needYouTube = !existingYouTube;
+    const needItunes = !existingItunes;
+    const needSpotify = !existingSpotify;
 
-    // Amazon タイトル（推測）
+    // Amazon タイトル（推測） - 整合性チェックのため常に取得
     let amazonTitle = null;
     try {
       const attrTitle = await item.getAttribute("primary-text");
@@ -147,71 +161,99 @@ async function getText(url, timeoutMs = 15000) {
 
     const amazonActual = episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url);
 
-    // ③ 他PFの軽量取得
+    // ③ 他PFの軽量取得（必要なプラットフォームのみ）
     let ytTitle = null,
       itTitle = null,
       spTitle = null;
-    try {
-      const r = await getText(YT_FEED_URL);
-      if (r.ok) {
-        const m = r.text.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/i);
-        if (m) ytTitle = m[1];
-      }
-    } catch {}
-    try {
-      const r = await getJson(ITUNES_LOOKUP_URL);
-      if (r.ok && r.json && Array.isArray(r.json.results)) {
-        const ep = r.json.results.find((x) => x.wrapperType === "podcastEpisode");
-        if (ep) itTitle = ep.trackName || ep.collectionName || null;
-      }
-    } catch {}
-    try {
-      const spPage = await context.newPage();
-      await spPage.goto(`https://open.spotify.com/show/${SPOTIFY_SHOW_ID}`, {
-        waitUntil: "domcontentloaded",
-        timeout: 90000,
-      });
-      await spPage.waitForLoadState("networkidle", { timeout: 60000 });
-      const firstEp = spPage.locator('a[href^="/episode/"]').first();
-      if (await firstEp.count()) {
-        const container = firstEp.locator("xpath=ancestor-or-self::*[1]");
-        spTitle = (await container.innerText()).split("\n").filter(Boolean)[0] || null;
-      }
-      await spPage.close();
-    } catch {}
-
-    // ④ WP 更新
-    const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
-    const baseBody = { field: FIELD_KEY, value: episode_url, is_acf: true, skip_if_exists: true };
-    const body = POST_ID ? { ...baseBody, post_id: POST_ID } : baseBody;
-
-    let resultJson = null;
-    for (const url of ENDPOINTS) {
+    
+    // YouTube の取得（必要な場合のみ）
+    if (needYouTube) {
       try {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            Accept: "application/json",
-            Authorization: auth,
-          },
-          body: JSON.stringify(body),
-        });
-        const text = await res.text();
-        try {
-          resultJson = JSON.parse(text);
-        } catch {
-          resultJson = { raw: text };
+        const r = await getText(YT_FEED_URL);
+        if (r.ok) {
+          const m = r.text.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/i);
+          if (m) ytTitle = m[1];
         }
-        if (res.ok) break;
       } catch {}
+    }
+    
+    // iTunes の取得（必要な場合のみ）
+    if (needItunes) {
+      try {
+        const r = await getJson(ITUNES_LOOKUP_URL);
+        if (r.ok && r.json && Array.isArray(r.json.results)) {
+          const ep = r.json.results.find((x) => x.wrapperType === "podcastEpisode");
+          if (ep) itTitle = ep.trackName || ep.collectionName || null;
+        }
+      } catch {}
+    }
+    
+    // Spotify の取得（必要な場合のみ）
+    if (needSpotify) {
+      try {
+        const spPage = await context.newPage();
+        await spPage.goto(`https://open.spotify.com/show/${SPOTIFY_SHOW_ID}`, {
+          waitUntil: "domcontentloaded",
+          timeout: 90000,
+        });
+        await spPage.waitForLoadState("networkidle", { timeout: 60000 });
+        const firstEp = spPage.locator('a[href^="/episode/"]').first();
+        if (await firstEp.count()) {
+          const container = firstEp.locator("xpath=ancestor-or-self::*[1]");
+          spTitle = (await container.innerText()).split("\n").filter(Boolean)[0] || null;
+        }
+        await spPage.close();
+      } catch {}
+    }
+
+    // ④ WP 更新（Amazon Music が必要な場合のみ）
+    const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
+    let resultJson = null;
+    
+    if (needAmazon) {
+      const baseBody = { field: FIELD_KEY, value: episode_url, is_acf: true, skip_if_exists: true };
+      const body = POST_ID ? { ...baseBody, post_id: POST_ID } : baseBody;
+
+      for (const url of ENDPOINTS) {
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              Accept: "application/json",
+              Authorization: auth,
+            },
+            body: JSON.stringify(body),
+          });
+          const text = await res.text();
+          try {
+            resultJson = JSON.parse(text);
+          } catch {
+            resultJson = { raw: text };
+          }
+          if (res.ok) break;
+        } catch {}
+      }
+    } else {
+      // Amazon Musicが既に存在する場合はスキップ
+      resultJson = { 
+        skipped: true, 
+        reason: "Amazon Music URL already exists",
+        post_id: targetPostId || POST_ID
+      };
     }
 
     // ⑤ platforms
     const matched_post_id = resultJson && resultJson.post_id ? resultJson.post_id : null;
     const platforms = [];
 
-    const amazonPlatform = asPlatform("amazon_music", episode_url, resultJson);
+    // Amazon Music
+    const finalAmazonUrl = needAmazon ? episode_url : existingAmazon;
+    const amazonPlatform = asPlatform("amazon_music", finalAmazonUrl, resultJson);
+    if (!needAmazon) {
+      amazonPlatform.skipped_reason = "URL already exists";
+      amazonPlatform.updated = false;
+    }
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: amazonActual,
@@ -220,72 +262,72 @@ async function getText(url, timeoutMs = 15000) {
     };
     platforms.push(amazonPlatform);
 
+    // YouTube
     const feeds = (resultJson && resultJson.feeds) || {};
     const yt = feeds.youtube;
-    const it = feeds.itunes;
-
-    if (yt) {
+    let ytObj;
+    
+    if (!needYouTube) {
+      // 既存URLを使用
+      ytObj = asPlatform("youtube", existingYouTube, { skipped: true, reason: "URL already exists" });
+    } else if (yt) {
       const yt_url = yt.episode_url || yt.url || yt.value || yt.link || null;
-      const obj = asPlatform("youtube", yt_url, yt);
-      obj.coherence = {
-        expected: expectedEpisode,
-        actual: episodeNumFromTitle(ytTitle),
-        title: ytTitle,
-        matched:
-          (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
-          expectedEpisode == null
-            ? true
-            : false,
-      };
-      platforms.push(obj);
+      ytObj = asPlatform("youtube", yt_url, yt);
     } else {
-      const obj = asPlatform("youtube", null, yt || {});
-      obj.coherence = {
-        expected: expectedEpisode,
-        actual: episodeNumFromTitle(ytTitle),
-        title: ytTitle,
-        matched:
-          (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
-          expectedEpisode == null
-            ? true
-            : false,
-      };
-      platforms.push(obj);
+      ytObj = asPlatform("youtube", null, yt || {});
     }
+    
+    ytObj.coherence = {
+      expected: expectedEpisode,
+      actual: episodeNumFromTitle(ytTitle),
+      title: ytTitle,
+      matched:
+        (expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
+        expectedEpisode == null
+          ? true
+          : false,
+    };
+    platforms.push(ytObj);
 
-    if (it) {
+    // iTunes
+    const it = feeds.itunes;
+    let itObj;
+    
+    if (!needItunes) {
+      // 既存URLを使用
+      itObj = asPlatform("itunes", existingItunes, { skipped: true, reason: "URL already exists" });
+    } else if (it) {
       const it_url = it.episode_url || it.url || it.value || it.link || null;
-      const obj = asPlatform("itunes", it_url, it);
-      obj.coherence = {
-        expected: expectedEpisode,
-        actual: episodeNumFromTitle(itTitle),
-        title: itTitle,
-        matched:
-          (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
-          expectedEpisode == null
-            ? true
-            : false,
-      };
-      platforms.push(obj);
+      itObj = asPlatform("itunes", it_url, it);
     } else {
-      const obj = asPlatform("itunes", null, it || {});
-      obj.coherence = {
-        expected: expectedEpisode,
-        actual: episodeNumFromTitle(itTitle),
-        title: itTitle,
-        matched:
-          (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
-          expectedEpisode == null
-            ? true
-            : false,
-      };
-      platforms.push(obj);
+      itObj = asPlatform("itunes", null, it || {});
     }
+    
+    itObj.coherence = {
+      expected: expectedEpisode,
+      actual: episodeNumFromTitle(itTitle),
+      title: itTitle,
+      matched:
+        (expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
+        expectedEpisode == null
+          ? true
+          : false,
+    };
+    platforms.push(itObj);
 
+    // Spotify
     const sp_wrap = (resultJson && resultJson.spotify) || {};
     const sp = sp_wrap.result || null;
-    const sp_url = (sp && (sp.episode_url || sp.url || sp.value || sp.link)) || null;
-    const spObj = asPlatform("spotify", sp_url, sp || sp_wrap);
+    let spObj;
+    
+    if (!needSpotify) {
+      // 既存URLを使用
+      spObj = asPlatform("spotify", existingSpotify, { skipped: true, reason: "URL already exists" });
+    } else {
+      const sp_url = (sp && (sp.episode_url || sp.url || sp.value || sp.link)) || null;
+      spObj = asPlatform("spotify", sp_url, sp || sp_wrap);
+    }
+    
     spObj.coherence = {
       expected: expectedEpisode,
       actual: episodeNumFromTitle(spTitle),
