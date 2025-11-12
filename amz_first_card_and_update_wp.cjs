@@ -99,6 +99,19 @@ function episodeNumFromUrl(u) {
   const m = dec.match(/episode[\s\-_/]*([0-9]{1,4})/i);
   return m ? Number(m[1]) : null;
 }
+// URL normalizer for canonical equality checks (ignores query/hash, trims, lowercases, decodes)
+function normalizeUrl(u) {
+  if (!u || typeof u !== "string") return "";
+  try {
+    const dec = decodeURIComponent(u.trim());
+    // drop hash and query entirely for canonical comparison
+    const noHash = dec.split('#')[0];
+    const base = noHash.split('?')[0];
+    return base.replace(/\/+$/,'').toLowerCase();
+  } catch {
+    return String(u).trim().toLowerCase();
+  }
+}
 function computeMatched(need, actual, expected, bootstrap) {
   // If the platform URL already exists, we want matched = null ("--")
   if (!need) return null;
@@ -142,7 +155,7 @@ async function getText(url, timeoutMs = 15000) {
 (async () => {
   let browser;
   try {
-    // ① Amazon Music の最初の横長カードから URL 取得
+    // ① Amazon placeholders (will be filled only if needAmazon)
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
       locale: "ja-JP",
@@ -150,24 +163,10 @@ async function getText(url, timeoutMs = 15000) {
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     });
-    const page = await context.newPage();
-    await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
-    await page.waitForLoadState("networkidle", { timeout: 60000 });
-
-    const item = page.locator("music-episode-row-item").first();
-    if (!(await item.count())) return fail();
-
-    let href = await item.getAttribute("primary-href");
-    if (!href) {
-      const link = item.locator('a[href*="/episodes/"]').first();
-      if (await link.count()) href = await link.getAttribute("href");
-    }
-    if (!href) return fail();
-    if (href.startsWith("/")) {
-      const { origin } = new URL(CHANNEL_URL);
-      href = origin + href;
-    }
-    const episode_url = href;
+    // Amazon placeholders (will be filled only if needAmazon)
+    let episode_url = null; // Amazon episode URL candidate
+    let amazonTitle = null;
+    let amazonActual = null;
 
     // ② hossy.org 側の期待エピソード & 既存のプラットフォームURL
     const cacheBust = Date.now();
@@ -209,26 +208,45 @@ async function getText(url, timeoutMs = 15000) {
     const needItunes = !(existingItunes && /^https?:\/\//.test(existingItunes));
     const needSpotify = !(existingSpotify && /^https?:\/\//.test(existingSpotify));
 
-    // Amazon タイトル（推測） - 整合性チェックのため常に取得
-    let amazonTitle = null;
-    try {
-      const attrTitle = await item.getAttribute("primary-text");
-      if (attrTitle && attrTitle.trim()) amazonTitle = attrTitle.trim();
-      if (!amazonTitle) {
-        const titleNode = item.locator('[slot="title"], .title, [data-testid="title"]').first();
-        if (await titleNode.count()) {
-          const t = (await titleNode.innerText()).trim();
-          if (t) amazonTitle = t;
+    // ① Amazon Music の最初の横長カードから URL 取得（必要な場合のみ）
+    if (needAmazon) {
+      try {
+        const page = await context.newPage();
+        await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
+        await page.waitForLoadState("networkidle", { timeout: 60000 });
+        const item = page.locator("music-episode-row-item").first();
+        if (!(await item.count())) return fail();
+        let href = await item.getAttribute("primary-href");
+        if (!href) {
+          const link = item.locator('a[href*="/episodes/"]').first();
+          if (await link.count()) href = await link.getAttribute("href");
         }
-      }
-      if (!amazonTitle) {
-        const raw = await item.evaluate((el) => (el.textContent || "").trim());
-        if (raw) amazonTitle = raw.split("\n").map((s) => s.trim()).filter(Boolean)[0] || raw.replace(/\s+/g, " ");
-      }
-    } catch {}
-
-    const amazonActual = episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url);
-    
+        if (!href) return fail();
+        if (href.startsWith("/")) {
+          const { origin } = new URL(CHANNEL_URL);
+          href = origin + href;
+        }
+        episode_url = href;
+        // タイトル推測
+        try {
+          const attrTitle = await item.getAttribute("primary-text");
+          if (attrTitle && attrTitle.trim()) amazonTitle = attrTitle.trim();
+          if (!amazonTitle) {
+            const titleNode = item.locator('[slot="title"], .title, [data-testid="title"]').first();
+            if (await titleNode.count()) {
+              const t = (await titleNode.innerText()).trim();
+              if (t) amazonTitle = t;
+            }
+          }
+          if (!amazonTitle) {
+            const raw = await item.evaluate((el) => (el.textContent || "").trim());
+            if (raw) amazonTitle = raw.split("\n").map((s) => s.trim()).filter(Boolean)[0] || raw.replace(/\s+/g, " ");
+          }
+        } catch {}
+        amazonActual = episodeNumFromTitle(amazonTitle) ?? episodeNumFromUrl(episode_url);
+        await page.close();
+      } catch {}
+    }
     // 整合性チェック（Amazon Music）
     const amazonMatched = expectedEpisode == null ? true : amazonActual === expectedEpisode;
 
@@ -292,7 +310,7 @@ async function getText(url, timeoutMs = 15000) {
     let resultAmazon = null, resultYouTube = null, resultItunes = null, resultSpotify = null;
     const postId = targetPostId || POST_ID;
     // Amazon
-    const sameAMZ = !!(existingAmazon && episode_url && existingAmazon === episode_url);
+    const sameAMZ = !!(existingAmazon && episode_url && normalizeUrl(existingAmazon) === normalizeUrl(episode_url));
     if (!needAmazon) {
       resultAmazon = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (amazonActual == null || expectedEpisode == null ? false : amazonActual !== expectedEpisode) {
@@ -305,7 +323,7 @@ async function getText(url, timeoutMs = 15000) {
       resultAmazon = { ...(resultAmazon||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultAmazon&&resultAmazon.meta||{}), skipped: true, reason: "already_has_value" } };
     }
     // YouTube
-    const sameYT = !!(existingYouTube && ytUrl && existingYouTube === ytUrl);
+    const sameYT = !!(existingYouTube && ytUrl && normalizeUrl(existingYouTube) === normalizeUrl(ytUrl));
     if (!needYouTube) {
       resultYouTube = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(ytTitle) == null && expectedEpisode != null) {
@@ -317,7 +335,7 @@ async function getText(url, timeoutMs = 15000) {
       resultYouTube = { ...(resultYouTube||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultYouTube&&resultYouTube.meta||{}), skipped: true, reason: "already_has_value" } };
     }
     // iTunes
-    const sameIT = !!(existingItunes && itUrl && existingItunes === itUrl);
+    const sameIT = !!(existingItunes && itUrl && normalizeUrl(existingItunes) === normalizeUrl(itUrl));
     if (!needItunes) {
       resultItunes = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(itTitle) == null && expectedEpisode != null) {
@@ -329,7 +347,7 @@ async function getText(url, timeoutMs = 15000) {
       resultItunes = { ...(resultItunes||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultItunes&&resultItunes.meta||{}), skipped: true, reason: "already_has_value" } };
     }
     // Spotify
-    const sameSP = !!(existingSpotify && spUrl && existingSpotify === spUrl);
+    const sameSP = !!(existingSpotify && spUrl && normalizeUrl(existingSpotify) === normalizeUrl(spUrl));
     if (!needSpotify) {
       resultSpotify = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(spTitle) == null && expectedEpisode != null) {
@@ -360,6 +378,10 @@ async function getText(url, timeoutMs = 15000) {
       amazonPlatform.updated = false;
       amazonPlatform.skipped_reason = "already_has_value";
     }
+    // If not updated, no skipped_reason yet, but sameAMZ, force already_has_value
+    if (!amazonPlatform.updated && !amazonPlatform.skipped_reason && sameAMZ) {
+      amazonPlatform.skipped_reason = "already_has_value";
+    }
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
@@ -382,6 +404,9 @@ async function getText(url, timeoutMs = 15000) {
     const ytWasSkipped = (pickUpdated(resultYouTube) === false) && !!(pickReason(resultYouTube) || ytObj.skipped_reason);
     if (!needYouTube) {
       ytObj.updated = false;
+      ytObj.skipped_reason = "already_has_value";
+    }
+    if (!ytObj.updated && !ytObj.skipped_reason && sameYT) {
       ytObj.skipped_reason = "already_has_value";
     }
     ytObj.coherence = {
@@ -408,6 +433,9 @@ async function getText(url, timeoutMs = 15000) {
       itObj.updated = false;
       itObj.skipped_reason = "already_has_value";
     }
+    if (!itObj.updated && !itObj.skipped_reason && sameIT) {
+      itObj.skipped_reason = "already_has_value";
+    }
     itObj.coherence = {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
@@ -430,6 +458,9 @@ async function getText(url, timeoutMs = 15000) {
     const spWasSkipped = (pickUpdated(resultSpotify) === false) && !!(pickReason(resultSpotify) || spObj.skipped_reason);
     if (!needSpotify) {
       spObj.updated = false;
+      spObj.skipped_reason = "already_has_value";
+    }
+    if (!spObj.updated && !spObj.skipped_reason && sameSP) {
       spObj.skipped_reason = "already_has_value";
     }
     spObj.coherence = {
