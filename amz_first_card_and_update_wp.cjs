@@ -52,11 +52,11 @@ function asPlatform(name, episode_url, srcObj) {
 }
 
 // Helper to POST update to WP for a specific fieldKey/value/postId
-async function postToWP(fieldKey, value, postId) {
+async function postToWP(fieldKey, value, postId, skipIfExists = true) {
   if (!fieldKey) return { skipped: true, reason: "no_field_key" };
   if (!value)    return { skipped: true, reason: "no_value" };
   const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
-  const baseBody = { field: fieldKey, value, is_acf: true, skip_if_exists: true };
+  const baseBody = { field: fieldKey, value, is_acf: true, skip_if_exists: !!skipIfExists };
   const body = postId ? { ...baseBody, post_id: postId } : baseBody;
   let last = { skipped: true, reason: "no_endpoint" };
   for (const url of ENDPOINTS) {
@@ -289,7 +289,7 @@ async function getText(url, timeoutMs = 15000) {
     } else if (amazonActual == null || expectedEpisode == null ? false : amazonActual !== expectedEpisode) {
       resultAmazon = { skipped: true, reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`, post_id: postId };
     } else {
-      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId);
+      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ !needAmazon);
     }
     // YouTube
     if (!needYouTube) {
@@ -297,7 +297,7 @@ async function getText(url, timeoutMs = 15000) {
     } else if (episodeNumFromTitle(ytTitle) == null && expectedEpisode != null) {
       resultYouTube = { skipped: true, reason: "no_title_or_episode", post_id: postId };
     } else {
-      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId);
+      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ !needYouTube);
     }
     // iTunes
     if (!needItunes) {
@@ -305,7 +305,7 @@ async function getText(url, timeoutMs = 15000) {
     } else if (episodeNumFromTitle(itTitle) == null && expectedEpisode != null) {
       resultItunes = { skipped: true, reason: "no_title_or_episode", post_id: postId };
     } else {
-      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId);
+      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ !needItunes);
     }
     // Spotify
     if (!needSpotify) {
@@ -313,7 +313,7 @@ async function getText(url, timeoutMs = 15000) {
     } else if (episodeNumFromTitle(spTitle) == null && expectedEpisode != null) {
       resultSpotify = { skipped: true, reason: "no_title_or_episode", post_id: postId };
     } else {
-      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId);
+      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ !needSpotify);
     }
 
     // ⑤ platforms
