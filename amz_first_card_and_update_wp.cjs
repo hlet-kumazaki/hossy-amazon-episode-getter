@@ -276,7 +276,12 @@ async function getText(url, timeoutMs = 15000) {
     
     if (!needYouTube) {
       // 既存URLを使用
-      ytObj = asPlatform("youtube", existingYouTube, { skipped: true, reason: "URL already exists" });
+      ytObj = { 
+        name: "youtube", 
+        episode_url: existingYouTube, 
+        updated: false, 
+        skipped_reason: "URL already exists" 
+      };
     } else if (yt) {
       const yt_url = yt.episode_url || yt.url || yt.value || yt.link || null;
       ytObj = asPlatform("youtube", yt_url, yt);
@@ -303,7 +308,12 @@ async function getText(url, timeoutMs = 15000) {
     
     if (!needItunes) {
       // 既存URLを使用
-      itObj = asPlatform("itunes", existingItunes, { skipped: true, reason: "URL already exists" });
+      itObj = { 
+        name: "itunes", 
+        episode_url: existingItunes, 
+        updated: false, 
+        skipped_reason: "URL already exists" 
+      };
     } else if (it) {
       const it_url = it.episode_url || it.url || it.value || it.link || null;
       itObj = asPlatform("itunes", it_url, it);
@@ -331,7 +341,12 @@ async function getText(url, timeoutMs = 15000) {
     
     if (!needSpotify) {
       // 既存URLを使用
-      spObj = asPlatform("spotify", existingSpotify, { skipped: true, reason: "URL already exists" });
+      spObj = { 
+        name: "spotify", 
+        episode_url: existingSpotify, 
+        updated: false, 
+        skipped_reason: "URL already exists" 
+      };
     } else {
       const sp_url = (sp && (sp.episode_url || sp.url || sp.value || sp.link)) || null;
       spObj = asPlatform("spotify", sp_url, sp || sp_wrap);
