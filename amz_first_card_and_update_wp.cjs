@@ -300,6 +300,10 @@ async function getText(url, timeoutMs = 15000) {
     } else {
       resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ sameAMZ || !needAmazon);
     }
+    // Fallback: same URL but no reason from API -> treat as already_has_value
+    if (sameAMZ && (!pickReason(resultAmazon))) {
+      resultAmazon = { ...(resultAmazon||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultAmazon&&resultAmazon.meta||{}), skipped: true, reason: "already_has_value" } };
+    }
     // YouTube
     const sameYT = !!(existingYouTube && ytUrl && existingYouTube === ytUrl);
     if (!needYouTube) {
@@ -308,6 +312,9 @@ async function getText(url, timeoutMs = 15000) {
       resultYouTube = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
       resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ sameYT || !needYouTube);
+    }
+    if (sameYT && (!pickReason(resultYouTube))) {
+      resultYouTube = { ...(resultYouTube||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultYouTube&&resultYouTube.meta||{}), skipped: true, reason: "already_has_value" } };
     }
     // iTunes
     const sameIT = !!(existingItunes && itUrl && existingItunes === itUrl);
@@ -318,6 +325,9 @@ async function getText(url, timeoutMs = 15000) {
     } else {
       resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ sameIT || !needItunes);
     }
+    if (sameIT && (!pickReason(resultItunes))) {
+      resultItunes = { ...(resultItunes||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultItunes&&resultItunes.meta||{}), skipped: true, reason: "already_has_value" } };
+    }
     // Spotify
     const sameSP = !!(existingSpotify && spUrl && existingSpotify === spUrl);
     if (!needSpotify) {
@@ -326,6 +336,9 @@ async function getText(url, timeoutMs = 15000) {
       resultSpotify = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
       resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ sameSP || !needSpotify);
+    }
+    if (sameSP && (!pickReason(resultSpotify))) {
+      resultSpotify = { ...(resultSpotify||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultSpotify&&resultSpotify.meta||{}), skipped: true, reason: "already_has_value" } };
     }
 
     // ⑤ platforms
