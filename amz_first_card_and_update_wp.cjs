@@ -259,8 +259,29 @@ async function getText(url, timeoutMs = 15000) {
     const platforms = [];
 
     // Amazon Music
-    const finalAmazonUrl = (needAmazon && amazonMatched) ? episode_url : existingAmazon;
-    const amazonPlatform = asPlatform("amazon_music", finalAmazonUrl, resultJson);
+    let amazonPlatform;
+    
+    if (!needAmazon) {
+      // 既存URLを使用
+      amazonPlatform = { 
+        name: "amazon_music", 
+        episode_url: existingAmazon, 
+        updated: false, 
+        skipped_reason: "URL already exists" 
+      };
+    } else if (!amazonMatched) {
+      // 整合性チェック失敗
+      amazonPlatform = { 
+        name: "amazon_music", 
+        episode_url: null, 
+        updated: false, 
+        skipped_reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})` 
+      };
+    } else {
+      // 新規取得して更新
+      amazonPlatform = asPlatform("amazon_music", episode_url, resultJson);
+    }
+    
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
