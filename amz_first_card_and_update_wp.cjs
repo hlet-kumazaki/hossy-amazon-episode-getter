@@ -72,6 +72,14 @@ async function postToWP(fieldKey, value, postId, skipIfExists = true) {
       });
       const text = await res.text();
       try { last = JSON.parse(text); } catch { last = { raw: text }; }
+      // normalize result shape for mail/jq
+      if (last && typeof last === "object") {
+        const meta = last.meta || {};
+        if (typeof last.skipped === "boolean" && typeof meta.skipped !== "boolean") meta.skipped = last.skipped;
+        if ((last.reason || last.skipped_reason) && !meta.reason) meta.reason = last.reason || last.skipped_reason;
+        if (typeof last.updated !== "boolean" && typeof meta.skipped === "boolean") last.updated = (meta.skipped === false);
+        last.meta = meta;
+      }
       if (res.ok) break;
     } catch (e) {
       last = { skipped: true, reason: String(e && e.message ? e.message : e) };
@@ -284,36 +292,40 @@ async function getText(url, timeoutMs = 15000) {
     let resultAmazon = null, resultYouTube = null, resultItunes = null, resultSpotify = null;
     const postId = targetPostId || POST_ID;
     // Amazon
+    const sameAMZ = !!(existingAmazon && episode_url && existingAmazon === episode_url);
     if (!needAmazon) {
-      resultAmazon = { skipped: true, reason: "already_has_value", post_id: postId };
+      resultAmazon = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (amazonActual == null || expectedEpisode == null ? false : amazonActual !== expectedEpisode) {
-      resultAmazon = { skipped: true, reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`, post_id: postId };
+      resultAmazon = { updated: false, skipped_reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`, post_id: postId, meta: { skipped: true, reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})` } };
     } else {
-      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ !needAmazon);
+      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ sameAMZ || !needAmazon);
     }
     // YouTube
+    const sameYT = !!(existingYouTube && ytUrl && existingYouTube === ytUrl);
     if (!needYouTube) {
-      resultYouTube = { skipped: true, reason: "already_has_value", post_id: postId };
+      resultYouTube = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(ytTitle) == null && expectedEpisode != null) {
-      resultYouTube = { skipped: true, reason: "no_title_or_episode", post_id: postId };
+      resultYouTube = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
-      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ !needYouTube);
+      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ sameYT || !needYouTube);
     }
     // iTunes
+    const sameIT = !!(existingItunes && itUrl && existingItunes === itUrl);
     if (!needItunes) {
-      resultItunes = { skipped: true, reason: "already_has_value", post_id: postId };
+      resultItunes = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(itTitle) == null && expectedEpisode != null) {
-      resultItunes = { skipped: true, reason: "no_title_or_episode", post_id: postId };
+      resultItunes = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
-      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ !needItunes);
+      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ sameIT || !needItunes);
     }
     // Spotify
+    const sameSP = !!(existingSpotify && spUrl && existingSpotify === spUrl);
     if (!needSpotify) {
-      resultSpotify = { skipped: true, reason: "already_has_value", post_id: postId };
+      resultSpotify = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(spTitle) == null && expectedEpisode != null) {
-      resultSpotify = { skipped: true, reason: "no_title_or_episode", post_id: postId };
+      resultSpotify = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
-      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ !needSpotify);
+      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ sameSP || !needSpotify);
     }
 
     // ⑤ platforms
@@ -328,6 +340,7 @@ async function getText(url, timeoutMs = 15000) {
     };
     const amazonReason = pickReason(resultAmazon);
     if (amazonReason) amazonPlatform.skipped_reason = amazonReason;
+    if (!amazonReason && !pickUpdated(resultAmazon)) amazonPlatform.skipped_reason = "unknown";
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
@@ -346,6 +359,7 @@ async function getText(url, timeoutMs = 15000) {
     };
     const ytReason = pickReason(resultYouTube);
     if (ytReason) ytObj.skipped_reason = ytReason;
+    if (!ytReason && !pickUpdated(resultYouTube)) ytObj.skipped_reason = "unknown";
     ytObj.coherence = {
       expected: expectedEpisode,
       actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
@@ -364,6 +378,7 @@ async function getText(url, timeoutMs = 15000) {
     };
     const itReason = pickReason(resultItunes);
     if (itReason) itObj.skipped_reason = itReason;
+    if (!itReason && !pickUpdated(resultItunes)) itObj.skipped_reason = "unknown";
     itObj.coherence = {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
@@ -382,6 +397,7 @@ async function getText(url, timeoutMs = 15000) {
     };
     const spReason = pickReason(resultSpotify);
     if (spReason) spObj.skipped_reason = spReason;
+    if (!spReason && !pickUpdated(resultSpotify)) spObj.skipped_reason = "unknown";
     spObj.coherence = {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
