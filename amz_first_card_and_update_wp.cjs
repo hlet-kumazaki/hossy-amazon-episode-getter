@@ -2,7 +2,7 @@ const { chromium } = require("playwright");
 
 const CHANNEL_URL = process.env.CHANNEL_URL;
 const WP_USER = process.env.WP_USER;
-const WP_PASS = process.env.WP_PASS;Z
+const WP_PASS = process.env.WP_PASS;
 const FIELD_KEY_AMAZON = process.env.FIELD_KEY_AMAZON || "field_680d867a57991"; // backward compat
 const FIELD_KEY_YOUTUBE = process.env.FIELD_KEY_YOUTUBE || "field_680bf82a6b5c0";
 const FIELD_KEY_ITUNES  = process.env.FIELD_KEY_ITUNES  || "field_680bf86a6b5c2";
