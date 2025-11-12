@@ -59,6 +59,14 @@ function episodeNumFromUrl(u) {
   const m = dec.match(/episode[\s\-_/]*([0-9]{1,4})/i);
   return m ? Number(m[1]) : null;
 }
+function computeMatched(need, actual, expected, bootstrap) {
+  // If the platform URL already exists, we want matched = null ("--")
+  if (!need) return null;
+  // When expected is not available (bootstrap run), fall back to a bootstrap value (e.g., Amazon first card number)
+  const exp = expected != null ? expected : bootstrap;
+  if (exp == null || actual == null) return false;
+  return actual === exp;
+}
 
 async function getJson(url, timeoutMs = 15000) {
   const ac = new AbortController();
@@ -293,7 +301,7 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
       title: needAmazon ? amazonTitle : null,
-      matched: needAmazon ? amazonMatched : null,  // 既存URLがある場合はN/A
+      matched: computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual),
     };
     platforms.push(amazonPlatform);
 
@@ -332,12 +340,12 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
       title: needYouTube ? ytTitle : null,
-      matched: needYouTube
-        ? ((expectedEpisode != null && episodeNumFromTitle(ytTitle) === expectedEpisode) ||
-           expectedEpisode == null
-             ? true
-             : false)
-        : null,  // 既存URLがある場合はN/A
+      matched: computeMatched(
+        needYouTube,
+        episodeNumFromTitle(ytTitle),
+        expectedEpisode,
+        amazonActual
+      ),
     };
     platforms.push(ytObj);
 
@@ -375,12 +383,12 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
       title: needItunes ? itTitle : null,
-      matched: needItunes
-        ? ((expectedEpisode != null && episodeNumFromTitle(itTitle) === expectedEpisode) ||
-           expectedEpisode == null
-             ? true
-             : false)
-        : null,  // 既存URLがある場合はN/A
+      matched: computeMatched(
+        needItunes,
+        episodeNumFromTitle(itTitle),
+        expectedEpisode,
+        amazonActual
+      ),
     };
     platforms.push(itObj);
 
@@ -419,12 +427,12 @@ async function getText(url, timeoutMs = 15000) {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
       title: needSpotify ? spTitle : null,
-      matched: needSpotify
-        ? ((expectedEpisode != null && episodeNumFromTitle(spTitle) === expectedEpisode) ||
-           expectedEpisode == null
-             ? true
-             : false)
-        : null,  // 既存URLがある場合はN/A
+      matched: computeMatched(
+        needSpotify,
+        episodeNumFromTitle(spTitle),
+        expectedEpisode,
+        amazonActual
+      ),
     };
     platforms.push(spObj);
 
