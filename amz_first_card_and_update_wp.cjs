@@ -99,19 +99,6 @@ function episodeNumFromUrl(u) {
   const m = dec.match(/episode[\s\-_/]*([0-9]{1,4})/i);
   return m ? Number(m[1]) : null;
 }
-// URL normalizer for canonical equality checks (ignores query/hash, trims, lowercases, decodes)
-function normalizeUrl(u) {
-  if (!u || typeof u !== "string") return "";
-  try {
-    const dec = decodeURIComponent(u.trim());
-    // drop hash and query entirely for canonical comparison
-    const noHash = dec.split('#')[0];
-    const base = noHash.split('?')[0];
-    return base.replace(/\/+$/,'').toLowerCase();
-  } catch {
-    return String(u).trim().toLowerCase();
-  }
-}
 function computeMatched(need, actual, expected, bootstrap) {
   // If the platform URL already exists, we want matched = null ("--")
   if (!need) return null;
@@ -310,53 +297,36 @@ async function getText(url, timeoutMs = 15000) {
     let resultAmazon = null, resultYouTube = null, resultItunes = null, resultSpotify = null;
     const postId = targetPostId || POST_ID;
     // Amazon
-    const sameAMZ = !!(existingAmazon && episode_url && normalizeUrl(existingAmazon) === normalizeUrl(episode_url));
     if (!needAmazon) {
       resultAmazon = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (amazonActual == null || expectedEpisode == null ? false : amazonActual !== expectedEpisode) {
       resultAmazon = { updated: false, skipped_reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`, post_id: postId, meta: { skipped: true, reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})` } };
     } else {
-      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ sameAMZ || !needAmazon);
-    }
-    // Fallback: same URL but no reason from API -> treat as already_has_value
-    if (sameAMZ && (!pickReason(resultAmazon))) {
-      resultAmazon = { ...(resultAmazon||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultAmazon&&resultAmazon.meta||{}), skipped: true, reason: "already_has_value" } };
+      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId, /* skip_if_exists: */ !needAmazon);
     }
     // YouTube
-    const sameYT = !!(existingYouTube && ytUrl && normalizeUrl(existingYouTube) === normalizeUrl(ytUrl));
     if (!needYouTube) {
       resultYouTube = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(ytTitle) == null && expectedEpisode != null) {
       resultYouTube = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
-      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ sameYT || !needYouTube);
-    }
-    if (sameYT && (!pickReason(resultYouTube))) {
-      resultYouTube = { ...(resultYouTube||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultYouTube&&resultYouTube.meta||{}), skipped: true, reason: "already_has_value" } };
+      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId, /* skip_if_exists: */ !needYouTube);
     }
     // iTunes
-    const sameIT = !!(existingItunes && itUrl && normalizeUrl(existingItunes) === normalizeUrl(itUrl));
     if (!needItunes) {
       resultItunes = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(itTitle) == null && expectedEpisode != null) {
       resultItunes = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
-      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ sameIT || !needItunes);
-    }
-    if (sameIT && (!pickReason(resultItunes))) {
-      resultItunes = { ...(resultItunes||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultItunes&&resultItunes.meta||{}), skipped: true, reason: "already_has_value" } };
+      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId, /* skip_if_exists: */ !needItunes);
     }
     // Spotify
-    const sameSP = !!(existingSpotify && spUrl && normalizeUrl(existingSpotify) === normalizeUrl(spUrl));
     if (!needSpotify) {
       resultSpotify = { updated: false, skipped_reason: "already_has_value", post_id: postId, meta: { skipped: true, reason: "already_has_value" } };
     } else if (episodeNumFromTitle(spTitle) == null && expectedEpisode != null) {
       resultSpotify = { updated: false, skipped_reason: "no_title_or_episode", post_id: postId, meta: { skipped: true, reason: "no_title_or_episode" } };
     } else {
-      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ sameSP || !needSpotify);
-    }
-    if (sameSP && (!pickReason(resultSpotify))) {
-      resultSpotify = { ...(resultSpotify||{}), updated: false, skipped_reason: "already_has_value", meta: { ...(resultSpotify&&resultSpotify.meta||{}), skipped: true, reason: "already_has_value" } };
+      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId, /* skip_if_exists: */ !needSpotify);
     }
 
     // ⑤ platforms
@@ -371,15 +341,11 @@ async function getText(url, timeoutMs = 15000) {
     };
     const amazonReason = pickReason(resultAmazon);
     if (amazonReason) amazonPlatform.skipped_reason = amazonReason;
-    if (!amazonReason && !pickUpdated(resultAmazon)) amazonPlatform.skipped_reason = (!needAmazon || sameAMZ) ? "already_has_value" : "unknown";
+    if (!amazonReason && !pickUpdated(resultAmazon)) amazonPlatform.skipped_reason = (!needAmazon) ? "already_has_value" : "unknown";
     const amazonWasSkipped = (pickUpdated(resultAmazon) === false) && !!(pickReason(resultAmazon) || amazonPlatform.skipped_reason);
     // Final override: if already registered, force mail to show already_has_value and no coherence
     if (!needAmazon) {
       amazonPlatform.updated = false;
-      amazonPlatform.skipped_reason = "already_has_value";
-    }
-    // If not updated, no skipped_reason yet, but sameAMZ, force already_has_value
-    if (!amazonPlatform.updated && !amazonPlatform.skipped_reason && sameAMZ) {
       amazonPlatform.skipped_reason = "already_has_value";
     }
     // Final safety fallback: if not updated and no skipped_reason, force already_has_value
@@ -404,13 +370,10 @@ async function getText(url, timeoutMs = 15000) {
     };
     const ytReason = pickReason(resultYouTube);
     if (ytReason) ytObj.skipped_reason = ytReason;
-    if (!ytReason && !pickUpdated(resultYouTube)) ytObj.skipped_reason = (!needYouTube || sameYT) ? "already_has_value" : "unknown";
+    if (!ytReason && !pickUpdated(resultYouTube)) ytObj.skipped_reason = (!needYouTube) ? "already_has_value" : "unknown";
     const ytWasSkipped = (pickUpdated(resultYouTube) === false) && !!(pickReason(resultYouTube) || ytObj.skipped_reason);
     if (!needYouTube) {
       ytObj.updated = false;
-      ytObj.skipped_reason = "already_has_value";
-    }
-    if (!ytObj.updated && !ytObj.skipped_reason && sameYT) {
       ytObj.skipped_reason = "already_has_value";
     }
     // Final safety fallback: if not updated and no skipped_reason, force already_has_value
@@ -435,13 +398,10 @@ async function getText(url, timeoutMs = 15000) {
     };
     const itReason = pickReason(resultItunes);
     if (itReason) itObj.skipped_reason = itReason;
-    if (!itReason && !pickUpdated(resultItunes)) itObj.skipped_reason = (!needItunes || sameIT) ? "already_has_value" : "unknown";
+    if (!itReason && !pickUpdated(resultItunes)) itObj.skipped_reason = (!needItunes) ? "already_has_value" : "unknown";
     const itWasSkipped = (pickUpdated(resultItunes) === false) && !!(pickReason(resultItunes) || itObj.skipped_reason);
     if (!needItunes) {
       itObj.updated = false;
-      itObj.skipped_reason = "already_has_value";
-    }
-    if (!itObj.updated && !itObj.skipped_reason && sameIT) {
       itObj.skipped_reason = "already_has_value";
     }
     // Final safety fallback: if not updated and no skipped_reason, force already_has_value
@@ -466,13 +426,10 @@ async function getText(url, timeoutMs = 15000) {
     };
     const spReason = pickReason(resultSpotify);
     if (spReason) spObj.skipped_reason = spReason;
-    if (!spReason && !pickUpdated(resultSpotify)) spObj.skipped_reason = (!needSpotify || sameSP) ? "already_has_value" : "unknown";
+    if (!spReason && !pickUpdated(resultSpotify)) spObj.skipped_reason = (!needSpotify) ? "already_has_value" : "unknown";
     const spWasSkipped = (pickUpdated(resultSpotify) === false) && !!(pickReason(resultSpotify) || spObj.skipped_reason);
     if (!needSpotify) {
       spObj.updated = false;
-      spObj.skipped_reason = "already_has_value";
-    }
-    if (!spObj.updated && !spObj.skipped_reason && sameSP) {
       spObj.skipped_reason = "already_has_value";
     }
     // Final safety fallback: if not updated and no skipped_reason, force already_has_value
@@ -503,11 +460,7 @@ async function getText(url, timeoutMs = 15000) {
         existingAmazon: existingAmazon || "(empty)",
         existingYouTube: existingYouTube || "(empty)",
         existingItunes: existingItunes || "(empty)",
-        existingSpotify: existingSpotify || "(empty)",
-        sameAMZ,
-        sameYT,
-        sameIT,
-        sameSP
+        existingSpotify: existingSpotify || "(empty)"
       }
     });
   } catch (e) {
