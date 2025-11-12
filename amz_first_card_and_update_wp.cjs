@@ -4,6 +4,10 @@ const CHANNEL_URL = process.env.CHANNEL_URL;
 const WP_USER = process.env.WP_USER;
 const WP_PASS = process.env.WP_PASS;
 const FIELD_KEY = process.env.FIELD_KEY || "field_680d867a57991";
+const FIELD_KEY_AMAZON = process.env.FIELD_KEY_AMAZON || FIELD_KEY; // backward compat
+const FIELD_KEY_YOUTUBE = process.env.FIELD_KEY_YOUTUBE || "";
+const FIELD_KEY_ITUNES  = process.env.FIELD_KEY_ITUNES  || "";
+const FIELD_KEY_SPOTIFY = process.env.FIELD_KEY_SPOTIFY || "";
 const POST_ID = process.env.POST_ID && String(process.env.POST_ID).trim();
 
 const YT_FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4vypjnhxhnyGERcqRGv5nA";
@@ -46,6 +50,35 @@ function asPlatform(name, episode_url, srcObj) {
   const o = { name, episode_url, updated };
   if (reason) o.skipped_reason = reason;
   return o;
+}
+
+// Helper to POST update to WP for a specific fieldKey/value/postId
+async function postToWP(fieldKey, value, postId) {
+  if (!fieldKey) return { skipped: true, reason: "no_field_key" };
+  if (!value)    return { skipped: true, reason: "no_value" };
+  const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
+  const baseBody = { field: fieldKey, value, is_acf: true, skip_if_exists: true };
+  const body = postId ? { ...baseBody, post_id: postId } : baseBody;
+  let last = { skipped: true, reason: "no_endpoint" };
+  for (const url of ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          Accept: "application/json",
+          Authorization: auth,
+        },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      try { last = JSON.parse(text); } catch { last = { raw: text }; }
+      if (res.ok) break;
+    } catch (e) {
+      last = { skipped: true, reason: String(e && e.message ? e.message : e) };
+    }
+  }
+  return last;
 }
 
 function episodeNumFromTitle(t) {
@@ -196,7 +229,7 @@ async function getText(url, timeoutMs = 15000) {
     let ytTitle = null,
       itTitle = null,
       spTitle = null;
-    
+    let ytUrl = null, itUrl = null, spUrl = null;
     // YouTube の取得（必要な場合のみ）
     if (needYouTube) {
       try {
@@ -204,21 +237,27 @@ async function getText(url, timeoutMs = 15000) {
         if (r.ok) {
           const m = r.text.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/i);
           if (m) ytTitle = m[1];
+          // Extract YouTube episode URL from feed
+          const mLink = r.text.match(/<entry>[\s\S]*?<link[^>]*href=\"([^\"]+)\"/i);
+          if (mLink) ytUrl = mLink[1];
         }
       } catch {}
     }
-    
     // iTunes の取得（必要な場合のみ）
     if (needItunes) {
       try {
         const r = await getJson(ITUNES_LOOKUP_URL);
         if (r.ok && r.json && Array.isArray(r.json.results)) {
           const ep = r.json.results.find((x) => x.wrapperType === "podcastEpisode");
-          if (ep) itTitle = ep.trackName || ep.collectionName || null;
+          var itUrlTemp = null;
+          if (ep) {
+            itTitle = ep.trackName || ep.collectionName || null;
+            itUrlTemp = ep.trackViewUrl || null;
+          }
+          itUrl = itUrlTemp;
         }
       } catch {}
     }
-    
     // Spotify の取得（必要な場合のみ）
     if (needSpotify) {
       try {
@@ -230,6 +269,11 @@ async function getText(url, timeoutMs = 15000) {
         await spPage.waitForLoadState("networkidle", { timeout: 60000 });
         const firstEp = spPage.locator('a[href^="/episode/"]').first();
         if (await firstEp.count()) {
+          const href = await firstEp.getAttribute("href");
+          if (href) {
+            const { origin } = new URL("https://open.spotify.com");
+            spUrl = origin + href;
+          }
           const container = firstEp.locator("xpath=ancestor-or-self::*[1]");
           spTitle = (await container.innerText()).split("\n").filter(Boolean)[0] || null;
         }
@@ -237,238 +281,115 @@ async function getText(url, timeoutMs = 15000) {
       } catch {}
     }
 
-    // ④ WP 更新（Amazon Music が必要で、整合性チェックがマッチした場合のみ）
-    const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
-    let resultJson = null;
-    
+    // ④ 各PFを独立で WP 更新
+    let resultAmazon = null, resultYouTube = null, resultItunes = null, resultSpotify = null;
+    const postId = targetPostId || POST_ID;
+    // Amazon
     if (!needAmazon) {
-      // Amazon Musicが既に存在する場合はスキップ
-      resultJson = { 
-        skipped: true, 
-        reason: "Amazon Music URL already exists",
-        post_id: targetPostId || POST_ID
-      };
-    } else if (!amazonMatched) {
-      // 整合性チェックがマッチしない場合はスキップ
-      resultJson = { 
-        skipped: true, 
-        reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`,
-        post_id: targetPostId || POST_ID
-      };
+      resultAmazon = { skipped: true, reason: "already_has_value", post_id: postId };
+    } else if (amazonActual == null || expectedEpisode == null ? false : amazonActual !== expectedEpisode) {
+      resultAmazon = { skipped: true, reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})`, post_id: postId };
     } else {
-      // 整合性チェックがマッチした場合のみ更新
-      const baseBody = { field: FIELD_KEY, value: episode_url, is_acf: true, skip_if_exists: true };
-      const body = POST_ID ? { ...baseBody, post_id: POST_ID } : baseBody;
-
-      for (const url of ENDPOINTS) {
-        try {
-          const res = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json; charset=utf-8",
-              Accept: "application/json",
-              Authorization: auth,
-            },
-            body: JSON.stringify(body),
-          });
-          const text = await res.text();
-          try {
-            resultJson = JSON.parse(text);
-          } catch {
-            resultJson = { raw: text };
-          }
-          if (res.ok) break;
-        } catch {}
-      }
+      resultAmazon = await postToWP(FIELD_KEY_AMAZON, episode_url, postId);
+    }
+    // YouTube
+    if (!needYouTube) {
+      resultYouTube = { skipped: true, reason: "already_has_value", post_id: postId };
+    } else if (episodeNumFromTitle(ytTitle) == null && expectedEpisode != null) {
+      resultYouTube = { skipped: true, reason: "no_title_or_episode", post_id: postId };
+    } else {
+      resultYouTube = await postToWP(FIELD_KEY_YOUTUBE, ytUrl, postId);
+    }
+    // iTunes
+    if (!needItunes) {
+      resultItunes = { skipped: true, reason: "already_has_value", post_id: postId };
+    } else if (episodeNumFromTitle(itTitle) == null && expectedEpisode != null) {
+      resultItunes = { skipped: true, reason: "no_title_or_episode", post_id: postId };
+    } else {
+      resultItunes = await postToWP(FIELD_KEY_ITUNES, itUrl, postId);
+    }
+    // Spotify
+    if (!needSpotify) {
+      resultSpotify = { skipped: true, reason: "already_has_value", post_id: postId };
+    } else if (episodeNumFromTitle(spTitle) == null && expectedEpisode != null) {
+      resultSpotify = { skipped: true, reason: "no_title_or_episode", post_id: postId };
+    } else {
+      resultSpotify = await postToWP(FIELD_KEY_SPOTIFY, spUrl, postId);
     }
 
     // ⑤ platforms
-    const matched_post_id = resultJson && resultJson.post_id ? resultJson.post_id : null;
+    const matched_post_id = postId;
     const platforms = [];
 
     // Amazon Music
-    let amazonPlatform;
-    
-    if (!needAmazon) {
-      // 既存URLを使用
-      amazonPlatform = { 
-        name: "amazon_music", 
-        episode_url: existingAmazon, 
-        updated: false, 
-        skipped_reason: "URL already exists" 
-      };
-    } else if (!amazonMatched) {
-      // 整合性チェック失敗
-      amazonPlatform = { 
-        name: "amazon_music", 
-        episode_url: null, 
-        updated: false, 
-        skipped_reason: `Episode number mismatch (expected: ${expectedEpisode}, actual: ${amazonActual})` 
-      };
-    } else {
-      // 新規取得して更新（WordPress APIのレスポンスから必要な情報のみ取得）
-      const wpUpdated = pickUpdated(resultJson);
-      const wpReason = pickReason(resultJson);
-      amazonPlatform = { 
-        name: "amazon_music", 
-        episode_url: episode_url,
-        updated: wpUpdated
-      };
-      if (wpReason) amazonPlatform.skipped_reason = wpReason;
-    }
-    
+    let amazonPlatform = {
+      name: "amazon_music",
+      episode_url: needAmazon ? episode_url : existingAmazon,
+      updated: pickUpdated(resultAmazon)
+    };
+    const amazonReason = pickReason(resultAmazon);
+    if (amazonReason) amazonPlatform.skipped_reason = amazonReason;
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
       title: needAmazon ? amazonTitle : null,
-      matched: (amazonPlatform && amazonPlatform.skipped_reason === "already_has_value")
-        ? null
-        : computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual),
+      matched: computeMatched(needAmazon, amazonActual, expectedEpisode, amazonActual)
     };
     platforms.push(amazonPlatform);
 
     // YouTube
-    const feeds = (resultJson && resultJson.feeds) || {};
-    const yt = feeds.youtube;
-    let ytObj;
-    
-    if (!needYouTube) {
-      // 既存URLを使用
-      ytObj = { 
-        name: "youtube", 
-        episode_url: existingYouTube, 
-        updated: false, 
-        skipped_reason: "URL already exists" 
-      };
-    } else if (yt) {
-      const yt_url = yt.episode_url || yt.url || yt.value || yt.link || null;
-      const ytUpdated = pickUpdated(yt);
-      const ytReason = pickReason(yt);
-      ytObj = { 
-        name: "youtube", 
-        episode_url: yt_url,
-        updated: ytUpdated
-      };
-      if (ytReason) ytObj.skipped_reason = ytReason;
-    } else {
-      ytObj = { 
-        name: "youtube", 
-        episode_url: null,
-        updated: false
-      };
-    }
-    
+    let ytObj = {
+      name: "youtube",
+      episode_url: needYouTube ? ytUrl : existingYouTube,
+      updated: pickUpdated(resultYouTube)
+    };
+    const ytReason = pickReason(resultYouTube);
+    if (ytReason) ytObj.skipped_reason = ytReason;
     ytObj.coherence = {
       expected: expectedEpisode,
       actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
       title: needYouTube ? ytTitle : null,
-      matched: (ytObj && ytObj.skipped_reason === "already_has_value")
-        ? null
-        : computeMatched(
-            needYouTube,
-            episodeNumFromTitle(ytTitle),
-            expectedEpisode,
-            amazonActual
-          ),
+      matched: computeMatched(needYouTube, episodeNumFromTitle(ytTitle), expectedEpisode, amazonActual)
     };
     platforms.push(ytObj);
 
     // iTunes
-    const it = feeds.itunes;
-    let itObj;
-    
-    if (!needItunes) {
-      // 既存URLを使用
-      itObj = { 
-        name: "itunes", 
-        episode_url: existingItunes, 
-        updated: false, 
-        skipped_reason: "URL already exists" 
-      };
-    } else if (it) {
-      const it_url = it.episode_url || it.url || it.value || it.link || null;
-      const itUpdated = pickUpdated(it);
-      const itReason = pickReason(it);
-      itObj = { 
-        name: "itunes", 
-        episode_url: it_url,
-        updated: itUpdated
-      };
-      if (itReason) itObj.skipped_reason = itReason;
-    } else {
-      itObj = { 
-        name: "itunes", 
-        episode_url: null,
-        updated: false
-      };
-    }
-    
+    let itObj = {
+      name: "itunes",
+      episode_url: needItunes ? itUrl : existingItunes,
+      updated: pickUpdated(resultItunes)
+    };
+    const itReason = pickReason(resultItunes);
+    if (itReason) itObj.skipped_reason = itReason;
     itObj.coherence = {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
       title: needItunes ? itTitle : null,
-      matched: (itObj && itObj.skipped_reason === "already_has_value")
-        ? null
-        : computeMatched(
-            needItunes,
-            episodeNumFromTitle(itTitle),
-            expectedEpisode,
-            amazonActual
-          ),
+      matched: computeMatched(needItunes, episodeNumFromTitle(itTitle), expectedEpisode, amazonActual)
     };
     platforms.push(itObj);
 
     // Spotify
-    const sp_wrap = (resultJson && resultJson.spotify) || {};
-    const sp = sp_wrap.result || null;
-    let spObj;
-    
-    if (!needSpotify) {
-      // 既存URLを使用
-      spObj = { 
-        name: "spotify", 
-        episode_url: existingSpotify, 
-        updated: false, 
-        skipped_reason: "URL already exists" 
-      };
-    } else if (sp) {
-      const sp_url = (sp && (sp.episode_url || sp.url || sp.value || sp.link)) || null;
-      const spUpdated = pickUpdated(sp);
-      const spReason = pickReason(sp);
-      spObj = { 
-        name: "spotify", 
-        episode_url: sp_url,
-        updated: spUpdated
-      };
-      if (spReason) spObj.skipped_reason = spReason;
-    } else {
-      spObj = { 
-        name: "spotify", 
-        episode_url: null,
-        updated: false
-      };
-    }
-    
+    let spObj = {
+      name: "spotify",
+      episode_url: needSpotify ? spUrl : existingSpotify,
+      updated: pickUpdated(resultSpotify)
+    };
+    const spReason = pickReason(resultSpotify);
+    if (spReason) spObj.skipped_reason = spReason;
     spObj.coherence = {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
       title: needSpotify ? spTitle : null,
-      matched: (spObj && spObj.skipped_reason === "already_has_value")
-        ? null
-        : computeMatched(
-            needSpotify,
-            episodeNumFromTitle(spTitle),
-            expectedEpisode,
-            amazonActual
-          ),
+      matched: computeMatched(needSpotify, episodeNumFromTitle(spTitle), expectedEpisode, amazonActual)
     };
     platforms.push(spObj);
 
     // ⑥ 出力（デバッグ情報付き）
-    finish({ 
-      matched_post_id, 
-      target_title: targetTitle, 
-      target_url: targetUrl, 
+    finish({
+      matched_post_id,
+      target_title: targetTitle,
+      target_url: targetUrl,
       platforms,
       debug: {
         needAmazon,
