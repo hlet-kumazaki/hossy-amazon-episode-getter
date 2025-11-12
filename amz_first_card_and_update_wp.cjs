@@ -355,6 +355,11 @@ async function getText(url, timeoutMs = 15000) {
     if (amazonReason) amazonPlatform.skipped_reason = amazonReason;
     if (!amazonReason && !pickUpdated(resultAmazon)) amazonPlatform.skipped_reason = (!needAmazon || sameAMZ) ? "already_has_value" : "unknown";
     const amazonWasSkipped = (pickUpdated(resultAmazon) === false) && !!(pickReason(resultAmazon) || amazonPlatform.skipped_reason);
+    // Final override: if already registered, force mail to show already_has_value and no coherence
+    if (!needAmazon) {
+      amazonPlatform.updated = false;
+      amazonPlatform.skipped_reason = "already_has_value";
+    }
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
@@ -375,6 +380,10 @@ async function getText(url, timeoutMs = 15000) {
     if (ytReason) ytObj.skipped_reason = ytReason;
     if (!ytReason && !pickUpdated(resultYouTube)) ytObj.skipped_reason = (!needYouTube || sameYT) ? "already_has_value" : "unknown";
     const ytWasSkipped = (pickUpdated(resultYouTube) === false) && !!(pickReason(resultYouTube) || ytObj.skipped_reason);
+    if (!needYouTube) {
+      ytObj.updated = false;
+      ytObj.skipped_reason = "already_has_value";
+    }
     ytObj.coherence = {
       expected: expectedEpisode,
       actual: needYouTube ? episodeNumFromTitle(ytTitle) : null,
@@ -395,6 +404,10 @@ async function getText(url, timeoutMs = 15000) {
     if (itReason) itObj.skipped_reason = itReason;
     if (!itReason && !pickUpdated(resultItunes)) itObj.skipped_reason = (!needItunes || sameIT) ? "already_has_value" : "unknown";
     const itWasSkipped = (pickUpdated(resultItunes) === false) && !!(pickReason(resultItunes) || itObj.skipped_reason);
+    if (!needItunes) {
+      itObj.updated = false;
+      itObj.skipped_reason = "already_has_value";
+    }
     itObj.coherence = {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
@@ -415,6 +428,10 @@ async function getText(url, timeoutMs = 15000) {
     if (spReason) spObj.skipped_reason = spReason;
     if (!spReason && !pickUpdated(resultSpotify)) spObj.skipped_reason = (!needSpotify || sameSP) ? "already_has_value" : "unknown";
     const spWasSkipped = (pickUpdated(resultSpotify) === false) && !!(pickReason(resultSpotify) || spObj.skipped_reason);
+    if (!needSpotify) {
+      spObj.updated = false;
+      spObj.skipped_reason = "already_has_value";
+    }
     spObj.coherence = {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
