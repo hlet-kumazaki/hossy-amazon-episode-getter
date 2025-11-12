@@ -382,6 +382,10 @@ async function getText(url, timeoutMs = 15000) {
     if (!amazonPlatform.updated && !amazonPlatform.skipped_reason && sameAMZ) {
       amazonPlatform.skipped_reason = "already_has_value";
     }
+    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
+    if (!amazonPlatform.updated && !amazonPlatform.skipped_reason) {
+      amazonPlatform.skipped_reason = "already_has_value";
+    }
     amazonPlatform.coherence = {
       expected: expectedEpisode,
       actual: needAmazon ? amazonActual : null,
@@ -407,6 +411,10 @@ async function getText(url, timeoutMs = 15000) {
       ytObj.skipped_reason = "already_has_value";
     }
     if (!ytObj.updated && !ytObj.skipped_reason && sameYT) {
+      ytObj.skipped_reason = "already_has_value";
+    }
+    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
+    if (!ytObj.updated && !ytObj.skipped_reason) {
       ytObj.skipped_reason = "already_has_value";
     }
     ytObj.coherence = {
@@ -436,6 +444,10 @@ async function getText(url, timeoutMs = 15000) {
     if (!itObj.updated && !itObj.skipped_reason && sameIT) {
       itObj.skipped_reason = "already_has_value";
     }
+    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
+    if (!itObj.updated && !itObj.skipped_reason) {
+      itObj.skipped_reason = "already_has_value";
+    }
     itObj.coherence = {
       expected: expectedEpisode,
       actual: needItunes ? episodeNumFromTitle(itTitle) : null,
@@ -463,6 +475,10 @@ async function getText(url, timeoutMs = 15000) {
     if (!spObj.updated && !spObj.skipped_reason && sameSP) {
       spObj.skipped_reason = "already_has_value";
     }
+    // Final safety fallback: if not updated and no skipped_reason, force already_has_value
+    if (!spObj.updated && !spObj.skipped_reason) {
+      spObj.skipped_reason = "already_has_value";
+    }
     spObj.coherence = {
       expected: expectedEpisode,
       actual: needSpotify ? episodeNumFromTitle(spTitle) : null,
@@ -487,7 +503,11 @@ async function getText(url, timeoutMs = 15000) {
         existingAmazon: existingAmazon || "(empty)",
         existingYouTube: existingYouTube || "(empty)",
         existingItunes: existingItunes || "(empty)",
-        existingSpotify: existingSpotify || "(empty)"
+        existingSpotify: existingSpotify || "(empty)",
+        sameAMZ,
+        sameYT,
+        sameIT,
+        sameSP
       }
     });
   } catch (e) {
