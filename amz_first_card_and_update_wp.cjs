@@ -61,7 +61,7 @@ function episodeNumFromUrl(u) {
 }
 function computeMatched(need, actual, expected, bootstrap) {
   // If the platform URL already exists, we want matched = null ("--")
-  if (!need) return "null";
+  if (!need) return null;
   // When expected is not available (bootstrap run), fall back to a bootstrap value (e.g., Amazon first card number)
   const exp = expected != null ? expected : bootstrap;
   if (exp == null || actual == null) return false;
@@ -130,24 +130,43 @@ async function getText(url, timeoutMs = 15000) {
     const episode_url = href;
 
     // ② hossy.org 側の期待エピソード & 既存のプラットフォームURL
-    const latestSite = await getJson("https://hossy.org/wp-json/agent/v1/latest");
+    const cacheBust = Date.now();
+    const latestSite = await getJson(`https://hossy.org/wp-json/agent/v1/latest?t=${cacheBust}`);
     const expectedEpisode = latestSite && latestSite.json ? latestSite.json.episode_num : null;
     const targetTitle = latestSite && latestSite.json ? latestSite.json.title : null;
     const targetUrl = latestSite && latestSite.json ? latestSite.json.url : null;
     const targetPostId = latestSite && latestSite.json ? latestSite.json.post_id : null;
     const existingFields = latestSite && latestSite.json ? latestSite.json.fields : null;
-    
+
+    function pickUrlField(fields, keys) {
+      if (!fields || typeof fields !== "object") return "";
+      for (const k of keys) {
+        const v = fields[k];
+        let s = null;
+        if (!v) continue;
+        if (typeof v === "string") s = v;
+        else if (typeof v.url === "string") s = v.url;
+        else if (typeof v.value === "string") s = v.value;
+        if (typeof s === "string") {
+          s = s.trim();
+          if (!s || s === "null" || s === "undefined") continue;
+          return s;
+        }
+      }
+      return "";
+    }
+
     // 既存のプラットフォームURLをチェック
-    const existingAmazon = existingFields && existingFields.amazon_music ? existingFields.amazon_music.trim() : "";
-    const existingYouTube = existingFields && existingFields.youtube ? existingFields.youtube.trim() : "";
-    const existingItunes = existingFields && existingFields.itunes ? existingFields.itunes.trim() : "";
-    const existingSpotify = existingFields && existingFields.spotify ? existingFields.spotify.trim() : "";
-    
+    const existingAmazon = pickUrlField(existingFields, ["amazon_music", "amazon", "amazon_music_url"]);
+    const existingYouTube = pickUrlField(existingFields, ["youtube", "yt", "youtube_url"]);
+    const existingItunes = pickUrlField(existingFields, ["itunes", "apple_podcasts", "itunes_url", "apple_podcasts_url"]);
+    const existingSpotify = pickUrlField(existingFields, ["spotify", "spotify_url"]);
+
     // どのプラットフォームを取得する必要があるか判定
-    const needAmazon = !existingAmazon;
-    const needYouTube = !existingYouTube;
-    const needItunes = !existingItunes;
-    const needSpotify = !existingSpotify;
+    const needAmazon = !(existingAmazon && /^https?:\/\//.test(existingAmazon));
+    const needYouTube = !(existingYouTube && /^https?:\/\//.test(existingYouTube));
+    const needItunes = !(existingItunes && /^https?:\/\//.test(existingItunes));
+    const needSpotify = !(existingSpotify && /^https?:\/\//.test(existingSpotify));
 
     // Amazon タイトル（推測） - 整合性チェックのため常に取得
     let amazonTitle = null;
