@@ -364,11 +364,13 @@ async function main() {
 
     const amazonPlatform = {
       name: 'amazon_music',
-      episode_url: amazonData.url || existingAmazon || null,
+      episode_url: needAmazon ? (amazonData.url || existingAmazon || null) : null,
       updated: !!amazonMetaResult.updated,
       skipped_reason: amazonMetaResult.skipped
-        ? amazonMetaResult.reason || 'already_has_value'
-        : null,
+        ? (amazonMetaResult.reason || 'already_has_value')
+        : (!amazonMetaResult.updated && amazonMetaResult.reason
+            ? amazonMetaResult.reason
+            : null),
       coherence: {
         expected: expectedEpisode,
         actual: needAmazon ? amazonData.episodeNum : null,
@@ -405,11 +407,13 @@ async function main() {
 
     const ytPlatform = {
       name: 'youtube',
-      episode_url: ytData.url || existingYouTube || null,
+      episode_url: needYouTube ? (ytData.url || existingYouTube || null) : null,
       updated: !!ytMetaResult.updated,
       skipped_reason: ytMetaResult.skipped
-        ? ytMetaResult.reason || 'already_has_value'
-        : null,
+        ? (ytMetaResult.reason || 'already_has_value')
+        : (!ytMetaResult.updated && ytMetaResult.reason
+            ? ytMetaResult.reason
+            : null),
       coherence: {
         expected: expectedEpisode,
         actual: needYouTube ? ytData.episodeNum : null,
@@ -446,11 +450,13 @@ async function main() {
 
     const itPlatform = {
       name: 'itunes',
-      episode_url: itData.url || existingItunes || null,
+      episode_url: needItunes ? (itData.url || existingItunes || null) : null,
       updated: !!itMetaResult.updated,
       skipped_reason: itMetaResult.skipped
-        ? itMetaResult.reason || 'already_has_value'
-        : null,
+        ? (itMetaResult.reason || 'already_has_value')
+        : (!itMetaResult.updated && itMetaResult.reason
+            ? itMetaResult.reason
+            : null),
       coherence: {
         expected: expectedEpisode,
         actual: needItunes ? itData.episodeNum : null,
@@ -487,11 +493,13 @@ async function main() {
 
     const spPlatform = {
       name: 'spotify',
-      episode_url: spData.url || existingSpotify || null,
+      episode_url: needSpotify ? (spData.url || existingSpotify || null) : null,
       updated: !!spMetaResult.updated,
       skipped_reason: spMetaResult.skipped
-        ? spMetaResult.reason || 'already_has_value'
-        : null,
+        ? (spMetaResult.reason || 'already_has_value')
+        : (!spMetaResult.updated && spMetaResult.reason
+            ? spMetaResult.reason
+            : null),
       coherence: {
         expected: expectedEpisode,
         actual: needSpotify ? spData.episodeNum : null,
@@ -519,6 +527,10 @@ async function main() {
         ytData,
         itData,
         spData,
+        amazonMetaResult,
+        ytMetaResult,
+        itMetaResult,
+        spMetaResult,
       },
     };
 
