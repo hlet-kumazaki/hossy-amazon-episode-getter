@@ -531,6 +531,12 @@ async function main() {
         ytMetaResult,
         itMetaResult,
         spMetaResult,
+        // 追加デバッグ
+        fieldsKeys: Object.keys(fields),
+        rawAmazonField: fields[META_KEY_AMAZON],
+        rawYouTubeField: fields[META_KEY_YOUTUBE],
+        rawItunesField: fields[META_KEY_ITUNES],
+        rawSpotifyField: fields[META_KEY_SPOTIFY],
       },
     };
 
