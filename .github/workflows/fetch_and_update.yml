@@ -32,7 +32,7 @@ jobs:
       - name: Fetch URL & Update WP
         id: runit
         env:
-          CHANNEL_URL: ${{ vars.CHANNEL_URL }}   # repo Variables で管理
+          CHANNEL_URL: ${{ vars.CHANNEL_URL }}   # repo Variables で管理（現状 cjs 側では未使用だが保持）
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
           FIELD_KEY: ${{ vars.FIELD_KEY }}
@@ -40,10 +40,12 @@ jobs:
           POST_ID: ${{ inputs.post_id }}         # 手動Run時のみ任意指定可
         run: |
           set -euo pipefail
-          if [ -z "${CHANNEL_URL:-}" ]; then echo "CHANNEL_URL not provided"; exit 1; fi
           OUT=$(node amz_first_card_and_update_wp.cjs)
-          echo "$OUT" | tee result.json
-          echo "json=$OUT" >> "$GITHUB_OUTPUT"
+          # 保存用は整形したまま
+          echo "$OUT" > result.json
+          # GITHUB_OUTPUT には 1 行 JSON を渡す
+          OUT_ONE_LINE=$(echo "$OUT" | jq -c . || echo '{}')
+          echo "json=$OUT_ONE_LINE" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         run: |

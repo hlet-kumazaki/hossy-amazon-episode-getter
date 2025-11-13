@@ -14,27 +14,23 @@ const WP_PASS = process.env.WP_PASS;
 
 // Amazon
 const AMAZON_CHANNEL_URL = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931/%E3%83%AA%E3%82%A2%E3%83%AB%E7%B5%8C%E5%96%B6%EF%BD%9C%E7%AD%89%E8%BA%AB%E5%A4%A7%E3%81%A7%E8%AA%9E%E3%82%8B%E5%8F%B0%E6%9C%AC%E3%81%AA%E3%81%8D%E7%A4%BE%E9%95%B7%E3%81%AE%E3%83%AA%E3%82%A2%E3%83%AB'; // Amazon Music の番組URL
-const FIELD_KEY_AMAZON = "field_680d867a57991"; // ACF field_key
-const META_KEY_AMAZON =
-  process.env.META_KEY_AMAZON || 'amazon_music'; // latest.fields のキー
-
+const META_KEY_AMAZON  = 'amazon_podcast';        // ACF フィールド名 (meta_key)
+const FIELD_KEY_AMAZON = 'field_680d867a57991';   // ACF field_key
 // YouTube
 const YT_FEED_URL =
   'https://www.youtube.com/feeds/videos.xml?channel_id=UC4vypjnhxhnyGERcqRGv5nA'; // Real Management Podcast YouTube channel feed
-const FIELD_KEY_YOUTUBE = "field_680bf82a6b5c0";
-const META_KEY_YOUTUBE = process.env.META_KEY_YOUTUBE || 'youtube';
-
+const META_KEY_YOUTUBE  = 'youtube_podcast';      // ACF フィールド名 (meta_key)
+const FIELD_KEY_YOUTUBE = 'field_680bf82a6b5c0';  // ACF field_key
 // Apple Podcasts
 const ITUNES_LOOKUP_URL =
   'https://itunes.apple.com/lookup?id=1810690058&entity=podcastEpisode';
-const FIELD_KEY_ITUNES  = "field_680bf86a6b5c2";
-const META_KEY_ITUNES = process.env.META_KEY_ITUNES || 'itunes';
-
+const META_KEY_ITUNES  = 'apple_podcast';         // ACF フィールド名 (meta_key)
+const FIELD_KEY_ITUNES = 'field_680bf86a6b5c2';   // ACF field_key
 // Spotify
 const SPOTIFY_SHOW_URL =
   'https://open.spotify.com/show/1F9Wl0HZBxkHsVToJhpyQl'; // Real Management Podcast show URL
-const FIELD_KEY_SPOTIFY = "field_680bf85c6b5c1";
-const META_KEY_SPOTIFY = process.env.META_KEY_SPOTIFY || 'spotify';
+const META_KEY_SPOTIFY  = 'spotify_podcast';      // ACF フィールド名 (meta_key)
+const FIELD_KEY_SPOTIFY = 'field_680bf85c6b5c1';  // ACF field_key
 
 // エピソード番号期待値（ハードコード 1 を維持）
 // 必要になったら EXPECTED_EPISODE 環境変数で上書き可能
