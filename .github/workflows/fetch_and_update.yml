@@ -63,6 +63,7 @@ jobs:
           # Read result.json (fallback to {})
           if [ -f result.json ]; then RES=$(cat result.json); else RES="{}"; fi
           if ! echo "$RES" | jq . >/dev/null 2>&1; then RES="{}"; fi
+          WARN_NO_NEW=$(echo "$RES" | jq -r '.warn_no_new_episode // false')
 
           STATUS_TXT=$( 
             echo "$RES" | jq -r '
@@ -118,6 +119,10 @@ jobs:
           )
 
           {
+            if [ "$WARN_NO_NEW" = "true" ]; then
+              echo "※※※新しいエピソードが公開されていない可能性があります※※※"
+              echo
+            fi
             echo "エピソードURL取り込みを実行しました。"
             echo
             echo "実行日時：${JST_NOW}"

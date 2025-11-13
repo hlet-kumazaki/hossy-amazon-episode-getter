@@ -364,6 +364,37 @@ async function main() {
         ? Number(process.env.EXPECTED_EPISODE)
         : (typeof latest.episode_num === 'number' ? latest.episode_num : null);
 
+    // 公開日ベースで「新しいエピソードが公開されていない可能性」を判定する
+    // 優先して GMT 系フィールドを使い、なければローカル日時を JST とみなして UTC に変換
+    const publishDateGmt = latest.post_date_gmt || latest.date_gmt || null;
+    const publishDateLocal = latest.post_date || latest.date || null;
+
+    let publishUtcMs = null;
+    if (publishDateGmt) {
+      const d = new Date(publishDateGmt);
+      if (!isNaN(d)) {
+        publishUtcMs = d.getTime();
+      }
+    } else if (publishDateLocal) {
+      const d = new Date(publishDateLocal);
+      if (!isNaN(d)) {
+        // ローカル日時は JST 相当とみなし、UTC に変換
+        publishUtcMs = d.getTime() - 9 * 60 * 60 * 1000;
+      }
+    }
+
+    // 現在時刻から「プログラム開始した日の JST 06:00」を UTC ミリ秒で算出
+    const nowUtc = new Date();
+    const nowJst = new Date(nowUtc.getTime() + 9 * 60 * 60 * 1000);
+    const jstYear = nowJst.getUTCFullYear();
+    const jstMonth = nowJst.getUTCMonth();
+    const jstDate = nowJst.getUTCDate();
+    // JST 06:00 は UTC では前日の 21:00 だが、UTC ミリ秒としては下記で算出
+    const thresholdUtcMs = Date.UTC(jstYear, jstMonth, jstDate, 6 - 9, 0, 0, 0);
+
+    const warnNoNewEpisode =
+      publishUtcMs != null && publishUtcMs < thresholdUtcMs;
+
     // 既存URL
     const existingAmazon = pickExistingUrl(fields, META_KEY_AMAZON);
     const existingYouTube = pickExistingUrl(fields, META_KEY_YOUTUBE);
@@ -592,6 +623,9 @@ async function main() {
       matched_post_id: postId,
       target_title: targetTitle,
       target_url: targetUrl,
+      warn_no_new_episode: warnNoNewEpisode,
+      publish_date_gmt: publishDateGmt || null,
+      publish_date_local: publishDateLocal || null,
       platforms: [amazonPlatform, ytPlatform, itPlatform, spPlatform],
       debug: {
         expectedEpisode,
@@ -621,6 +655,11 @@ async function main() {
         finalYouTube,
         finalItunes,
         finalSpotify,
+        publishDateGmt,
+        publishDateLocal,
+        publishUtcMs,
+        thresholdUtcMs,
+        warnNoNewEpisode,
       },
     };
 
