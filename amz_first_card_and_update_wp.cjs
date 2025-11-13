@@ -161,9 +161,21 @@ async function fetchAmazonLatest(context) {
       waitUntil: 'domcontentloaded',
       timeout: 90000,
     });
-    await page.waitForLoadState('networkidle', { timeout: 60000 });
 
-    const item = page.locator('music-episode-row-item').first();
+    // 最終URLをデバッグ出力（リダイレクト有無の確認用）
+    console.error('[AMZ] goto url =', AMAZON_CHANNEL_URL);
+    console.error('[AMZ] final url =', page.url());
+
+    // 旧コード同様、エピソード要素の出現を明示的に待つ
+    const selector = 'music-episode-row-item';
+    try {
+      await page.waitForSelector(selector, { timeout: 60000 });
+    } catch (e) {
+      // セレクタが一定時間出てこなかった場合はここで終了
+      return { url: null, title: null, episodeNum: null, error: 'no_episode_item' };
+    }
+
+    const item = page.locator(selector).first();
     if (!(await item.count())) {
       return { url: null, title: null, episodeNum: null, error: 'no_episode_item' };
     }
@@ -346,13 +358,18 @@ async function main() {
 
     if (needAmazon) {
       amazonData = await fetchAmazonLatest(context);
+
       if (amazonData.url && FIELD_KEY_AMAZON) {
+        // URL が取得できた場合のみ /meta に保存を試みる
         amazonMetaResult = await postMeta({
           field: FIELD_KEY_AMAZON,
           value: amazonData.url,
           isAcf: true,
           skipIfExists: false,
         });
+      } else if (amazonData.error) {
+        // URL が取れなかった場合は fetch 側のエラー内容を reason に反映しておく
+        amazonMetaResult.reason = amazonData.error;
       }
     }
 
