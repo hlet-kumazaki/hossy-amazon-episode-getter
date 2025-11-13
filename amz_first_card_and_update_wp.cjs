@@ -32,12 +32,6 @@ const SPOTIFY_SHOW_URL =
 const META_KEY_SPOTIFY  = 'spotify_podcast';      // ACF フィールド名 (meta_key)
 const FIELD_KEY_SPOTIFY = 'field_680bf85c6b5c1';  // ACF field_key
 
-// エピソード番号期待値（ハードコード 1 を維持）
-// 必要になったら EXPECTED_EPISODE 環境変数で上書き可能
-const HARDCODE_EXPECTED =
-  process.env.EXPECTED_EPISODE != null
-    ? Number(process.env.EXPECTED_EPISODE)
-    : 1;
 
 // ----------------------------------------------------------------------------
 // 共通ヘルパ
@@ -326,7 +320,10 @@ async function main() {
     const targetTitle = latest.title;
     const targetUrl = latest.url;
     const fields = latest.fields || {};
-    const expectedEpisode = HARDCODE_EXPECTED;
+    const expectedEpisode =
+      process.env.EXPECTED_EPISODE != null
+        ? Number(process.env.EXPECTED_EPISODE)
+        : (typeof latest.episode_num === 'number' ? latest.episode_num : null);
 
     // 既存URL
     const existingAmazon = pickExistingUrl(fields, META_KEY_AMAZON);
