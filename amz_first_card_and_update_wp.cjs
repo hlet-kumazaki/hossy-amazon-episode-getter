@@ -162,6 +162,9 @@ async function fetchAmazonLatest(context) {
       timeout: 90000,
     });
 
+    // 旧コードと同様に networkidle まで待機
+    await page.waitForLoadState('networkidle', { timeout: 60000 });
+
     // 最終URLをデバッグ出力（リダイレクト有無の確認用）
     console.error('[AMZ] goto url =', AMAZON_CHANNEL_URL);
     console.error('[AMZ] final url =', page.url());
@@ -319,7 +322,12 @@ async function fetchSpotifyLatest(context) {
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    locale: 'ja-JP',
+    timezoneId: 'Asia/Tokyo',
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  });
 
   try {
     // 1) 最新投稿 & 既存フィールド取得
