@@ -408,13 +408,15 @@ async function main() {
 
     const amazonPlatform = {
       name: 'amazon_music',
-      episode_url: needAmazon ? (amazonData.url || existingAmazon || null) : null,
-      updated: !!amazonMetaResult.updated,
-      skipped_reason: amazonMetaResult.skipped
-        ? (amazonMetaResult.reason || 'already_has_value')
-        : (!amazonMetaResult.updated && amazonMetaResult.reason
-            ? amazonMetaResult.reason
-            : null),
+      // 既存URLがある場合はスキップ扱いとし、URLは表示しない（null）
+      episode_url: needAmazon ? (amazonData.url || null) : null,
+      // 判定は PHP のレスポンスではなく「cjs が有効なURLを取得できたかどうか」で行う
+      updated: needAmazon && isValidUrl(amazonData.url),
+      skipped_reason: !needAmazon
+        ? 'already_has_value'
+        : (!isValidUrl(amazonData.url) && amazonData.error
+            ? amazonData.error
+            : (!isValidUrl(amazonData.url) ? 'fetch_failed' : null)),
       coherence: {
         expected: expectedEpisode,
         actual: needAmazon ? amazonData.episodeNum : null,
@@ -451,13 +453,13 @@ async function main() {
 
     const ytPlatform = {
       name: 'youtube',
-      episode_url: needYouTube ? (ytData.url || existingYouTube || null) : null,
-      updated: !!ytMetaResult.updated,
-      skipped_reason: ytMetaResult.skipped
-        ? (ytMetaResult.reason || 'already_has_value')
-        : (!ytMetaResult.updated && ytMetaResult.reason
-            ? ytMetaResult.reason
-            : null),
+      episode_url: needYouTube ? (ytData.url || null) : null,
+      updated: needYouTube && isValidUrl(ytData.url),
+      skipped_reason: !needYouTube
+        ? 'already_has_value'
+        : (!isValidUrl(ytData.url) && ytData.error
+            ? ytData.error
+            : (!isValidUrl(ytData.url) ? 'fetch_failed' : null)),
       coherence: {
         expected: expectedEpisode,
         actual: needYouTube ? ytData.episodeNum : null,
@@ -494,13 +496,13 @@ async function main() {
 
     const itPlatform = {
       name: 'itunes',
-      episode_url: needItunes ? (itData.url || existingItunes || null) : null,
-      updated: !!itMetaResult.updated,
-      skipped_reason: itMetaResult.skipped
-        ? (itMetaResult.reason || 'already_has_value')
-        : (!itMetaResult.updated && itMetaResult.reason
-            ? itMetaResult.reason
-            : null),
+      episode_url: needItunes ? (itData.url || null) : null,
+      updated: needItunes && isValidUrl(itData.url),
+      skipped_reason: !needItunes
+        ? 'already_has_value'
+        : (!isValidUrl(itData.url) && itData.error
+            ? itData.error
+            : (!isValidUrl(itData.url) ? 'fetch_failed' : null)),
       coherence: {
         expected: expectedEpisode,
         actual: needItunes ? itData.episodeNum : null,
@@ -537,13 +539,13 @@ async function main() {
 
     const spPlatform = {
       name: 'spotify',
-      episode_url: needSpotify ? (spData.url || existingSpotify || null) : null,
-      updated: !!spMetaResult.updated,
-      skipped_reason: spMetaResult.skipped
-        ? (spMetaResult.reason || 'already_has_value')
-        : (!spMetaResult.updated && spMetaResult.reason
-            ? spMetaResult.reason
-            : null),
+      episode_url: needSpotify ? (spData.url || null) : null,
+      updated: needSpotify && isValidUrl(spData.url),
+      skipped_reason: !needSpotify
+        ? 'already_has_value'
+        : (!isValidUrl(spData.url) && spData.error
+            ? spData.error
+            : (!isValidUrl(spData.url) ? 'fetch_failed' : null)),
       coherence: {
         expected: expectedEpisode,
         actual: needSpotify ? spData.episodeNum : null,
@@ -551,6 +553,40 @@ async function main() {
         matched: spMatched,
       },
     };
+
+    // すべての更新処理が終わったあとに、実際に保存されたURLを再取得して最終結果を補正
+    const latestAfter = await getJson(
+      `${LATEST_ENDPOINT}?t=${Date.now().toString()}&phase=after`
+    );
+    const fieldsAfter = latestAfter.fields || {};
+    const finalAmazon = pickExistingUrl(fieldsAfter, META_KEY_AMAZON);
+    const finalYouTube = pickExistingUrl(fieldsAfter, META_KEY_YOUTUBE);
+    const finalItunes = pickExistingUrl(fieldsAfter, META_KEY_ITUNES);
+    const finalSpotify = pickExistingUrl(fieldsAfter, META_KEY_SPOTIFY);
+
+    if (needAmazon && isValidUrl(finalAmazon)) {
+      amazonPlatform.episode_url = finalAmazon;
+      amazonPlatform.updated = true;
+      amazonPlatform.skipped_reason = null;
+    }
+
+    if (needYouTube && isValidUrl(finalYouTube)) {
+      ytPlatform.episode_url = finalYouTube;
+      ytPlatform.updated = true;
+      ytPlatform.skipped_reason = null;
+    }
+
+    if (needItunes && isValidUrl(finalItunes)) {
+      itPlatform.episode_url = finalItunes;
+      itPlatform.updated = true;
+      itPlatform.skipped_reason = null;
+    }
+
+    if (needSpotify && isValidUrl(finalSpotify)) {
+      spPlatform.episode_url = finalSpotify;
+      spPlatform.updated = true;
+      spPlatform.skipped_reason = null;
+    }
 
     const resultJson = {
       matched_post_id: postId,
@@ -581,6 +617,10 @@ async function main() {
         rawYouTubeField: fields[META_KEY_YOUTUBE],
         rawItunesField: fields[META_KEY_ITUNES],
         rawSpotifyField: fields[META_KEY_SPOTIFY],
+        finalAmazon,
+        finalYouTube,
+        finalItunes,
+        finalSpotify,
       },
     };
 
