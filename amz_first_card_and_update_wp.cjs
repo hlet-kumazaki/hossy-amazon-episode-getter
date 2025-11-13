@@ -89,22 +89,40 @@ async function postMeta({ field, value, isAcf = true, skipIfExists = true }) {
     };
   }
 
+  const meta = json && json.meta ? json.meta : {};
+
+  // エラー系: HTTPエラー or ok:false の場合
   if (!res.ok || json.ok === false) {
     return {
       ok: false,
       updated: false,
-      skipped: !!json.skipped,
-      reason: json.reason || 'update_failed',
-      meta: json.meta || null,
+      skipped: typeof meta.skipped === 'boolean' ? meta.skipped : !!json.skipped,
+      reason: meta.reason || json.reason || 'update_failed',
+      meta: meta,
     };
   }
 
+  // 正常系: meta.ok / meta.skipped を優先的に見る
+  let skipped;
+  let updated;
+
+  if (typeof meta.ok === 'boolean' || typeof meta.skipped === 'boolean') {
+    skipped = !!meta.skipped;
+    // 「更新成功」は ok=true かつ skipped=false とみなす
+    updated = !!meta.ok && !meta.skipped;
+  } else {
+    skipped = !!json.skipped;
+    updated = !!json.updated && !skipped;
+  }
+
+  const reason = meta.reason || json.reason || null;
+
   return {
     ok: true,
-    updated: !!json.updated,
-    skipped: !!json.skipped,
-    reason: json.reason || null,
-    meta: json.meta || null,
+    updated,
+    skipped,
+    reason,
+    meta,
   };
 }
 
