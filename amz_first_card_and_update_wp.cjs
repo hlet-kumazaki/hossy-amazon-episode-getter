@@ -57,6 +57,24 @@ async function getJson(url) {
   return res.json();
 }
 
+function pickUpdatedFromMeta(obj) {
+  const meta = (obj && obj.meta) || {};
+  if (typeof (obj && obj.updated) === 'boolean') return obj.updated;
+  if (typeof meta.updated === 'boolean') return meta.updated;
+  if (typeof meta.skipped === 'boolean') return meta.skipped === false;
+  return false;
+}
+
+function pickReasonFromMeta(obj) {
+  const meta = (obj && obj.meta) || {};
+  return (
+    (obj && (obj.reason || obj.skipped_reason)) ||
+    meta.reason ||
+    meta.skipped_reason ||
+    null
+  );
+}
+
 async function postMeta({ field, value, isAcf = true, skipIfExists = true }) {
   const body = {
     field,
@@ -89,36 +107,19 @@ async function postMeta({ field, value, isAcf = true, skipIfExists = true }) {
     };
   }
 
-  const meta = json && json.meta ? json.meta : {};
+  const meta = (json && json.meta) || {};
 
-  // エラー系: HTTPエラー or ok:false の場合
-  if (!res.ok || json.ok === false) {
-    return {
-      ok: false,
-      updated: false,
-      skipped: typeof meta.skipped === 'boolean' ? meta.skipped : !!json.skipped,
-      reason: meta.reason || json.reason || 'update_failed',
-      meta: meta,
-    };
+  const ok = res.ok && json.ok !== false;
+  const updated = pickUpdatedFromMeta(json);
+  const skipped = typeof meta.skipped === 'boolean' ? meta.skipped : !!json.skipped;
+  let reason = pickReasonFromMeta(json);
+
+  if (!ok && !reason) {
+    reason = 'update_failed';
   }
-
-  // 正常系: meta.ok / meta.skipped を優先的に見る
-  let skipped;
-  let updated;
-
-  if (typeof meta.ok === 'boolean' || typeof meta.skipped === 'boolean') {
-    skipped = !!meta.skipped;
-    // 「更新成功」は ok=true かつ skipped=false とみなす
-    updated = !!meta.ok && !meta.skipped;
-  } else {
-    skipped = !!json.skipped;
-    updated = !!json.updated && !skipped;
-  }
-
-  const reason = meta.reason || json.reason || null;
 
   return {
-    ok: true,
+    ok,
     updated,
     skipped,
     reason,
