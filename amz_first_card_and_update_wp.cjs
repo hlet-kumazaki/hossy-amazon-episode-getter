@@ -456,7 +456,8 @@ async function main() {
         existingUrl: existingAmazon,
         fetchLatest: () => fetchAmazonLatest(context),
         fieldKey: FIELD_KEY_AMAZON,
-        expectedEpisode,
+        30
+        //expectedEpisode,
       });
       amazonData = r.data;
       amazonMetaResult = r.metaResult;
