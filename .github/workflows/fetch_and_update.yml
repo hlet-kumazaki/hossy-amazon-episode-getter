@@ -67,12 +67,39 @@ jobs:
 
           STATUS_TXT=$( 
             echo "$RES" | jq -r '
-              def okcount: ([.platforms[]? | select(.updated==true)] | length);
-              def total: (.platforms|length // 0);
-              if (total == 0) then "不明"
-              elif (okcount==0) then "全て失敗"
-              elif (okcount==total) then "全て成功"
-              else "一部成功" end
+              # プラットフォーム配列の安全な取得
+              def platforms: (.platforms // []);
+  
+              # 更新成功した件数
+              def okcount: ([platforms[]? | select(.updated==true)] | length);
+  
+              # 総プラットフォーム数
+              def total: (platforms | length // 0);
+  
+              # スキップ理由を取得（他の箇所と揃える）
+              def reason($p): ($p.skipped_reason // $p.reason // ($p.meta // {}).reason // ($p.meta // {}).skipped_reason);
+  
+              # 「スキップ扱い」に含める理由（既存値あり / 整合性NG / 新着なし など）
+              def is_skipped($p):
+                (reason($p) // "") as $r
+                | ($r == "already_has_value"
+                   or $r == "coherence_mismatch"
+                   or $r == "no_new_episode");
+  
+              # エラー扱い（updated=false かつ スキップ理由ではない）
+              def errcount:
+                ([platforms[]? | select(.updated != true and (is_skipped(.) | not))] | length);
+  
+              if (total == 0) then
+                "不明"
+              elif (okcount > 0) then
+                if (okcount == total) then "全て成功" else "一部成功" end
+              elif (errcount > 0) then
+                "全て失敗"
+              else
+                # updated=0 かつ errcount=0 → 全てスキップ
+                "全てスキップ"
+              end
             '
           )
 
