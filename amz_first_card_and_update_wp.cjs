@@ -399,10 +399,10 @@ async function main() {
     const targetTitle = latest.title;
     const targetUrl = latest.url;
     const fields = latest.fields || {};
-    const expectedEpisode = 30;
-      // process.env.EXPECTED_EPISODE != null
-      //   ? Number(process.env.EXPECTED_EPISODE)
-      //   : (typeof latest.episode_num === 'number' ? latest.episode_num : null);
+    const expectedEpisode =
+      process.env.EXPECTED_EPISODE != null
+        ? Number(process.env.EXPECTED_EPISODE)
+        : (typeof latest.episode_num === 'number' ? latest.episode_num : null);
 
     // 公開日ベースで「新しいエピソードが公開されていない可能性」を判定する
     // 優先して GMT 系フィールドを使い、なければローカル日時を JST とみなして UTC に変換
