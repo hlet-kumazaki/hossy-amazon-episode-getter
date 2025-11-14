@@ -165,6 +165,46 @@ function computeMatched(need, expected, actual) {
   return actual === expected;
 }
 
+// 共通化: fetch → 整合性チェック → 保存
+async function fetchAndUpdatePlatform({ need, existingUrl, fetchLatest, fieldKey, expectedEpisode }) {
+  let data = { url: existingUrl, title: null, episodeNum: null, error: null };
+  let metaResult = {
+    updated: false,
+    skipped: !need,
+    reason: need ? null : 'already_has_value',
+  };
+
+  if (need) {
+    data = await fetchLatest();
+
+    // 一度ここで話数の整合性を判定し、不一致なら保存処理自体をスキップする
+    const provisionalMatched = computeMatched(
+      true,
+      expectedEpisode,
+      data.episodeNum
+    );
+
+    if (provisionalMatched === false) {
+      metaResult.updated = false;
+      metaResult.skipped = true;
+      metaResult.reason = 'coherence_mismatch';
+    } else if (data.url && fieldKey) {
+      metaResult = await postMeta({
+        field: fieldKey,
+        value: data.url,
+        isAcf: true,
+        skipIfExists: false,
+      });
+    } else if (data.error) {
+      metaResult.reason = data.error;
+    }
+  }
+
+  const matched = computeMatched(need, expectedEpisode, data.episodeNum);
+
+  return { data, metaResult, matched };
+}
+
 // ----------------------------------------------------------------------------
 // 各PF取得
 // ----------------------------------------------------------------------------
@@ -407,47 +447,35 @@ async function main() {
     const needSpotify = !isValidUrl(existingSpotify);
 
     // Amazon
-    let amazonData = { url: existingAmazon, title: null, episodeNum: null, error: null };
-    let amazonMetaResult = {
-      updated: false,
-      skipped: !needAmazon,
-      reason: needAmazon ? null : 'already_has_value',
-    };
-
-    if (needAmazon) {
-      amazonData = await fetchAmazonLatest(context);
-
-      if (amazonData.url && FIELD_KEY_AMAZON) {
-        // URL が取得できた場合のみ /meta に保存を試みる
-        amazonMetaResult = await postMeta({
-          field: FIELD_KEY_AMAZON,
-          value: amazonData.url,
-          isAcf: true,
-          skipIfExists: false,
-        });
-      } else if (amazonData.error) {
-        // URL が取れなかった場合は fetch 側のエラー内容を reason に反映しておく
-        amazonMetaResult.reason = amazonData.error;
-      }
+    let amazonData;
+    let amazonMetaResult;
+    let amazonMatched;
+    {
+      const r = await fetchAndUpdatePlatform({
+        need: needAmazon,
+        existingUrl: existingAmazon,
+        fetchLatest: () => fetchAmazonLatest(context),
+        fieldKey: FIELD_KEY_AMAZON,
+        expectedEpisode,
+      });
+      amazonData = r.data;
+      amazonMetaResult = r.metaResult;
+      amazonMatched = r.matched;
     }
-
-    const amazonMatched = computeMatched(
-      needAmazon,
-      expectedEpisode,
-      amazonData.episodeNum
-    );
 
     const amazonPlatform = {
       name: 'amazon_music',
       // 既存URLがある場合はスキップ扱いとし、URLは表示しない（null）
       episode_url: needAmazon ? (amazonData.url || null) : null,
-      // 判定は PHP のレスポンスではなく「cjs が有効なURLを取得できたかどうか」で行う
-      updated: needAmazon && isValidUrl(amazonData.url),
+      // 判定は話数の整合性 + URL の有効性で行う
+      updated: needAmazon && amazonMatched !== false && isValidUrl(amazonData.url),
       skipped_reason: !needAmazon
         ? 'already_has_value'
-        : (!isValidUrl(amazonData.url) && amazonData.error
-            ? amazonData.error
-            : (!isValidUrl(amazonData.url) ? 'fetch_failed' : null)),
+        : (amazonMatched === false
+            ? 'coherence_mismatch'
+            : (!isValidUrl(amazonData.url) && amazonData.error
+                ? amazonData.error
+                : (!isValidUrl(amazonData.url) ? 'fetch_failed' : null))),
       coherence: {
         expected: expectedEpisode,
         actual: needAmazon ? amazonData.episodeNum : null,
@@ -457,40 +485,33 @@ async function main() {
     };
 
     // YouTube
-    let ytData = { url: existingYouTube, title: null, episodeNum: null, error: null };
-    let ytMetaResult = {
-      updated: false,
-      skipped: !needYouTube,
-      reason: needYouTube ? null : 'already_has_value',
-    };
-
-    if (needYouTube) {
-      ytData = await fetchYouTubeLatest();
-      if (ytData.url && FIELD_KEY_YOUTUBE) {
-        ytMetaResult = await postMeta({
-          field: FIELD_KEY_YOUTUBE,
-          value: ytData.url,
-          isAcf: true,
-          skipIfExists: false,
-        });
-      }
+    let ytData;
+    let ytMetaResult;
+    let ytMatched;
+    {
+      const r = await fetchAndUpdatePlatform({
+        need: needYouTube,
+        existingUrl: existingYouTube,
+        fetchLatest: () => fetchYouTubeLatest(),
+        fieldKey: FIELD_KEY_YOUTUBE,
+        expectedEpisode,
+      });
+      ytData = r.data;
+      ytMetaResult = r.metaResult;
+      ytMatched = r.matched;
     }
-
-    const ytMatched = computeMatched(
-      needYouTube,
-      expectedEpisode,
-      ytData.episodeNum
-    );
 
     const ytPlatform = {
       name: 'youtube',
       episode_url: needYouTube ? (ytData.url || null) : null,
-      updated: needYouTube && isValidUrl(ytData.url),
+      updated: needYouTube && ytMatched !== false && isValidUrl(ytData.url),
       skipped_reason: !needYouTube
         ? 'already_has_value'
-        : (!isValidUrl(ytData.url) && ytData.error
-            ? ytData.error
-            : (!isValidUrl(ytData.url) ? 'fetch_failed' : null)),
+        : (ytMatched === false
+            ? 'coherence_mismatch'
+            : (!isValidUrl(ytData.url) && ytData.error
+                ? ytData.error
+                : (!isValidUrl(ytData.url) ? 'fetch_failed' : null))),
       coherence: {
         expected: expectedEpisode,
         actual: needYouTube ? ytData.episodeNum : null,
@@ -500,40 +521,33 @@ async function main() {
     };
 
     // iTunes
-    let itData = { url: existingItunes, title: null, episodeNum: null, error: null };
-    let itMetaResult = {
-      updated: false,
-      skipped: !needItunes,
-      reason: needItunes ? null : 'already_has_value',
-    };
-
-    if (needItunes) {
-      itData = await fetchItunesLatest();
-      if (itData.url && FIELD_KEY_ITUNES) {
-        itMetaResult = await postMeta({
-          field: FIELD_KEY_ITUNES,
-          value: itData.url,
-          isAcf: true,
-          skipIfExists: false,
-        });
-      }
+    let itData;
+    let itMetaResult;
+    let itMatched;
+    {
+      const r = await fetchAndUpdatePlatform({
+        need: needItunes,
+        existingUrl: existingItunes,
+        fetchLatest: () => fetchItunesLatest(),
+        fieldKey: FIELD_KEY_ITUNES,
+        expectedEpisode,
+      });
+      itData = r.data;
+      itMetaResult = r.metaResult;
+      itMatched = r.matched;
     }
-
-    const itMatched = computeMatched(
-      needItunes,
-      expectedEpisode,
-      itData.episodeNum
-    );
 
     const itPlatform = {
       name: 'itunes',
       episode_url: needItunes ? (itData.url || null) : null,
-      updated: needItunes && isValidUrl(itData.url),
+      updated: needItunes && itMatched !== false && isValidUrl(itData.url),
       skipped_reason: !needItunes
         ? 'already_has_value'
-        : (!isValidUrl(itData.url) && itData.error
-            ? itData.error
-            : (!isValidUrl(itData.url) ? 'fetch_failed' : null)),
+        : (itMatched === false
+            ? 'coherence_mismatch'
+            : (!isValidUrl(itData.url) && itData.error
+                ? itData.error
+                : (!isValidUrl(itData.url) ? 'fetch_failed' : null))),
       coherence: {
         expected: expectedEpisode,
         actual: needItunes ? itData.episodeNum : null,
@@ -543,40 +557,33 @@ async function main() {
     };
 
     // Spotify
-    let spData = { url: existingSpotify, title: null, episodeNum: null, error: null };
-    let spMetaResult = {
-      updated: false,
-      skipped: !needSpotify,
-      reason: needSpotify ? null : 'already_has_value',
-    };
-
-    if (needSpotify) {
-      spData = await fetchSpotifyLatest(context);
-      if (spData.url && FIELD_KEY_SPOTIFY) {
-        spMetaResult = await postMeta({
-          field: FIELD_KEY_SPOTIFY,
-          value: spData.url,
-          isAcf: true,
-          skipIfExists: false,
-        });
-      }
+    let spData;
+    let spMetaResult;
+    let spMatched;
+    {
+      const r = await fetchAndUpdatePlatform({
+        need: needSpotify,
+        existingUrl: existingSpotify,
+        fetchLatest: () => fetchSpotifyLatest(context),
+        fieldKey: FIELD_KEY_SPOTIFY,
+        expectedEpisode,
+      });
+      spData = r.data;
+      spMetaResult = r.metaResult;
+      spMatched = r.matched;
     }
-
-    const spMatched = computeMatched(
-      needSpotify,
-      expectedEpisode,
-      spData.episodeNum
-    );
 
     const spPlatform = {
       name: 'spotify',
       episode_url: needSpotify ? (spData.url || null) : null,
-      updated: needSpotify && isValidUrl(spData.url),
+      updated: needSpotify && spMatched !== false && isValidUrl(spData.url),
       skipped_reason: !needSpotify
         ? 'already_has_value'
-        : (!isValidUrl(spData.url) && spData.error
-            ? spData.error
-            : (!isValidUrl(spData.url) ? 'fetch_failed' : null)),
+        : (spMatched === false
+            ? 'coherence_mismatch'
+            : (!isValidUrl(spData.url) && spData.error
+                ? spData.error
+                : (!isValidUrl(spData.url) ? 'fetch_failed' : null))),
       coherence: {
         expected: expectedEpisode,
         actual: needSpotify ? spData.episodeNum : null,
@@ -595,25 +602,25 @@ async function main() {
     const finalItunes = pickExistingUrl(fieldsAfter, META_KEY_ITUNES);
     const finalSpotify = pickExistingUrl(fieldsAfter, META_KEY_SPOTIFY);
 
-    if (needAmazon && isValidUrl(finalAmazon)) {
+    if (needAmazon && amazonMatched !== false && isValidUrl(finalAmazon)) {
       amazonPlatform.episode_url = finalAmazon;
       amazonPlatform.updated = true;
       amazonPlatform.skipped_reason = null;
     }
 
-    if (needYouTube && isValidUrl(finalYouTube)) {
+    if (needYouTube && ytMatched !== false && isValidUrl(finalYouTube)) {
       ytPlatform.episode_url = finalYouTube;
       ytPlatform.updated = true;
       ytPlatform.skipped_reason = null;
     }
 
-    if (needItunes && isValidUrl(finalItunes)) {
+    if (needItunes && itMatched !== false && isValidUrl(finalItunes)) {
       itPlatform.episode_url = finalItunes;
       itPlatform.updated = true;
       itPlatform.skipped_reason = null;
     }
 
-    if (needSpotify && isValidUrl(finalSpotify)) {
+    if (needSpotify && spMatched !== false && isValidUrl(finalSpotify)) {
       spPlatform.episode_url = finalSpotify;
       spPlatform.updated = true;
       spPlatform.skipped_reason = null;
