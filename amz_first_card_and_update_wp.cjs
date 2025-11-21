@@ -423,14 +423,14 @@ async function main() {
       }
     }
 
-    // 現在時刻から「プログラム開始した日の JST 06:00」を UTC ミリ秒で算出
+    // 現在時刻から「プログラム開始した日の JST 05:00」を UTC ミリ秒で算出
     const nowUtc = new Date();
     const nowJst = new Date(nowUtc.getTime() + 9 * 60 * 60 * 1000);
     const jstYear = nowJst.getUTCFullYear();
     const jstMonth = nowJst.getUTCMonth();
     const jstDate = nowJst.getUTCDate();
-    // JST 06:00 は UTC では前日の 21:00 だが、UTC ミリ秒としては下記で算出
-    const thresholdUtcMs = Date.UTC(jstYear, jstMonth, jstDate, 6 - 9, 0, 0, 0);
+    // JST 05:00 は UTC では前日の 20:00 だが、UTC ミリ秒としては下記で算出
+    const thresholdUtcMs = Date.UTC(jstYear, jstMonth, jstDate, 5 - 9, 0, 0, 0);
 
     const warnNoNewEpisode =
       publishUtcMs != null && publishUtcMs < thresholdUtcMs;
