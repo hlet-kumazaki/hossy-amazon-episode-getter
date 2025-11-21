@@ -380,13 +380,8 @@ async function fetchSpotifyLatest(context) {
 // ----------------------------------------------------------------------------
 
 async function main() {
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    locale: 'ja-JP',
-    timezoneId: 'Asia/Tokyo',
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  });
+  let browser = null;
+  let context = null;
 
   try {
     // 1) 最新投稿 & 既存フィールド取得
@@ -445,6 +440,33 @@ async function main() {
     const needYouTube = !isValidUrl(existingYouTube);
     const needItunes = !isValidUrl(existingItunes);
     const needSpotify = !isValidUrl(existingSpotify);
+
+    const allAlreadyHasValue = !needAmazon && !needYouTube && !needItunes && !needSpotify;
+    const isPublishedAfter5am = publishUtcMs != null && publishUtcMs >= thresholdUtcMs;
+    if (allAlreadyHasValue && isPublishedAfter5am) {
+      // 全て既存URLがあり、かつ本日5時以降に公開された記事の場合、処理をスキップ
+      const resultJson = {
+        skipped_all: true,
+        matched_post_id: postId,
+        target_title: targetTitle,
+        target_url: targetUrl,
+        message: '全てのプラットフォームで既にURLが登録済みのため、処理をスキップしました。',
+        publish_date_gmt: publishDateGmt || null,
+        publish_date_local: publishDateLocal || null,
+      };
+
+      console.log(JSON.stringify(resultJson, null, 2));
+      return;
+    }
+
+    // ブラウザを起動（条件がfalseの場合のみ）
+    browser = await chromium.launch({ headless: true });
+    context = await browser.newContext({
+      locale: 'ja-JP',
+      timezoneId: 'Asia/Tokyo',
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    });
 
     // Amazon
     let amazonData;
@@ -673,8 +695,12 @@ async function main() {
     // GitHub Actions のメール整形側が読む前提の JSON 出力
     console.log(JSON.stringify(resultJson, null, 2));
   } finally {
-    await context.close();
-    await browser.close();
+    if (context) {
+      await context.close();
+    }
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
