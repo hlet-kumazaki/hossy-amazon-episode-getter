@@ -12,6 +12,9 @@ const META_ENDPOINT =
 const WP_USER = process.env.WP_USER;
 const WP_PASS = process.env.WP_PASS;
 
+// 全てalready_has_value時のメール通知フラグ（デフォルト: true）
+const NOTIFY_ON_SKIP_ALL =  'false';
+
 // Amazon
 const AMAZON_CHANNEL_URL = 'https://music.amazon.co.jp/podcasts/e5b6823d-8e80-425f-8935-83bf019b8931/%E3%83%AA%E3%82%A2%E3%83%AB%E7%B5%8C%E5%96%B6%EF%BD%9C%E7%AD%89%E8%BA%AB%E5%A4%A7%E3%81%A7%E8%AA%9E%E3%82%8B%E5%8F%B0%E6%9C%AC%E3%81%AA%E3%81%8D%E7%A4%BE%E9%95%B7%E3%81%AE%E3%83%AA%E3%82%A2%E3%83%AB'; // Amazon Music の番組URL
 const META_KEY_AMAZON  = 'amazon_podcast';        // ACF フィールド名 (meta_key)
@@ -447,6 +450,7 @@ async function main() {
       // 全て既存URLがあり、かつ本日5時以降に公開された記事の場合、処理をスキップ
       const resultJson = {
         skipped_all: true,
+        notify_on_skip_all: NOTIFY_ON_SKIP_ALL,
         matched_post_id: postId,
         target_title: targetTitle,
         target_url: targetUrl,
