@@ -70,6 +70,13 @@ jobs:
           NOTIFY_ON_SKIP_ALL=$(echo "$RES" | jq -r '.notify_on_skip_all // true')
           WARN_NO_NEW=$(echo "$RES" | jq -r '.warn_no_new_episode // false')
 
+          {
+            echo "### Emailprep RES (debug)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            echo "$RES" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          } || true
+
           # 全てスキップされた場合の簡潔なメール本文
           if [ "$SKIPPED_ALL" = "true" ] && [ "$NOTIFY_ON_SKIP_ALL" = "true" ]; then
             TARGET_TITLE=$(echo "$RES" | jq -r '.target_title // "(title unknown)"')
