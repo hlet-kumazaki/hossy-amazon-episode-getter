@@ -39,7 +39,6 @@ jobs:
           ENDPOINTS: ${{ vars.ENDPOINTS }}
           POST_ID: ${{ inputs.post_id }}         # 手動Run時のみ任意指定可
           # 全てalready_has_value時のメール通知フラグ（'true' または 'false'）
-          # リポジトリ変数 vars.NOTIFY_ON_SKIP_ALL で上書き可能、未設定時は 'true'
           # 直接値を変更する場合は 'true' または 'false' を指定
           NOTIFY_ON_SKIP_ALL: ${{ vars.NOTIFY_ON_SKIP_ALL || 'true' }}
         run: |
