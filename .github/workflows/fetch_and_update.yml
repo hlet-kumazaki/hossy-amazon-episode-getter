@@ -197,9 +197,15 @@ jobs:
             cat email_body.txt
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+          # NOTIFY_ON_SKIP_ALLを直接GITHUB_OUTPUTに書き込む（スキップされたが通知しない場合はfalse）
+          if [ "$SKIPPED_ALL" = "true" ] && [ "$NOTIFY_ON_SKIP_ALL" = "false" ]; then
+            echo "should_send_email=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_send_email=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Send notification email
-        if: always() && steps.emailprep.outputs.subject != ''
+        if: always() && steps.emailprep.outputs.should_send_email == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_HOST }}
