@@ -70,6 +70,13 @@ jobs:
           NOTIFY_ON_SKIP_ALL=$(echo "$RES" | jq -r '.notify_on_skip_all // true')
           WARN_NO_NEW=$(echo "$RES" | jq -r '.warn_no_new_episode // false')
 
+          # メール送信有無はここで先に確定させて GITHUB_OUTPUT に書き込む
+          if [ "$SKIPPED_ALL" = "true" ] && [ "$NOTIFY_ON_SKIP_ALL" = "false" ]; then
+            echo "should_send_email=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_send_email=true" >> "$GITHUB_OUTPUT"
+          fi
+
           {
             echo "### Emailprep RES (debug)" >> "$GITHUB_STEP_SUMMARY"
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
@@ -203,12 +210,6 @@ jobs:
             cat email_body.txt
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # NOTIFY_ON_SKIP_ALLを直接GITHUB_OUTPUTに書き込む（スキップされたが通知しない場合はfalse）
-          if [ "$SKIPPED_ALL" = "true" ] && [ "$NOTIFY_ON_SKIP_ALL" = "false" ]; then
-            echo "should_send_email=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_send_email=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Send notification email
         if: always() && steps.emailprep.outputs.should_send_email == 'true'
