@@ -66,8 +66,8 @@ jobs:
           # Read result.json (fallback to {})
           if [ -f result.json ]; then RES=$(cat result.json); else RES="{}"; fi
           if ! echo "$RES" | jq . >/dev/null 2>&1; then RES="{}"; fi
-          SKIPPED_ALL=$(echo "$RES" | jq -r '.skipped_all // false')
-          NOTIFY_ON_SKIP_ALL=$(echo "$RES" | jq -r '.notify_on_skip_all // true')
+          SKIPPED_ALL=$(echo "$RES" | jq -r 'if .skipped_all == null then "false" else .skipped_all end')
+          NOTIFY_ON_SKIP_ALL=$(echo "$RES" | jq -r 'if .notify_on_skip_all == null then "true" else .notify_on_skip_all end')
           WARN_NO_NEW=$(echo "$RES" | jq -r '.warn_no_new_episode // false')
 
           # メール送信有無はここで先に確定させて GITHUB_OUTPUT に書き込む
