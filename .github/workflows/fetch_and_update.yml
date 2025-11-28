@@ -77,19 +77,6 @@ jobs:
             SHOULD_SEND_EMAIL="true"
           fi
           echo "should_send_email=$SHOULD_SEND_EMAIL" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Emailprep Flags (debug)" >> "$GITHUB_STEP_SUMMARY"
-            echo "SKIPPED_ALL=$SKIPPED_ALL" >> "$GITHUB_STEP_SUMMARY"
-            echo "NOTIFY_ON_SKIP_ALL=$NOTIFY_ON_SKIP_ALL" >> "$GITHUB_STEP_SUMMARY"
-            echo "SHOULD_SEND_EMAIL=$SHOULD_SEND_EMAIL" >> "$GITHUB_STEP_SUMMARY"
-          } || true
-
-          {
-            echo "### Emailprep RES (debug)" >> "$GITHUB_STEP_SUMMARY"
-            echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            echo "$RES" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          } || true
 
           # 全てスキップされた場合の簡潔なメール本文
           if [ "$SKIPPED_ALL" = "true" ] && [ "$NOTIFY_ON_SKIP_ALL" = "true" ]; then
