@@ -94,9 +94,34 @@ jobs:
               echo
               echo "${MESSAGE}"
             } > email_body.txt
+
+            echo "$RES" | jq -r --arg jst "$JST_NOW" '
+              def esc($s): (($s // "") | tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;"));
+              def esc_attr($s): (($s // "") | tostring | gsub("&"; "&amp;") | gsub("\""; "&quot;"));
+              def link_http($u):
+                ($u | tostring) as $url
+                | if ($url | test("^https?://")) then
+                    "<a href=\"" + esc_attr($url) + "\">" + esc($url) + "</a>"
+                  else
+                    esc($url)
+                  end;
+              def format_body_msg($m):
+                ($m // "") as $t
+                | if ($t | test("^https?://\\S+$")) then link_http($t)
+                  else
+                    (esc($t) | gsub("(?<e>[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})"; "<a href=\"mailto:\(.e)\">\(.e)</a>"))
+                  end;
+              "<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"UTF-8\"></head><body style=\"font-family:sans-serif;line-height:1.6;color:#111\">" +
+              "<p>エピソードURL取り込み処理をスキップしました。</p>" +
+              "<p>実行日時：" + esc($jst) + "<br>" +
+              "対象ページ：" + esc(.target_title // "(title unknown)") + "</p>" +
+              "<p>" + format_body_msg(.message // "全てのプラットフォームで既にURLが登録済みのため、処理をスキップしました。") + "</p>" +
+              "</body></html>"
+            ' > email_body.html
           elif [ "$SKIPPED_ALL" = "true" ] && [ "$NOTIFY_ON_SKIP_ALL" = "false" ]; then
             # スキップされたが通知しない場合は空のメール本文とsubjectを作成（メール送信をスキップするため）
             echo "" > email_body.txt
+            echo "" > email_body.html
             SUBJECT=""
           else
             STATUS_TXT=$( 
@@ -192,6 +217,75 @@ jobs:
               echo
               printf "%s\n" "$PLAT_SECTIONS"
             } > email_body.txt
+
+            echo "$RES" | jq -r \
+              --arg warn "$WARN_NO_NEW" \
+              --arg jst "$JST_NOW" \
+              --arg title "$TARGET_TITLE" \
+              --arg tgt "$TARGET_URL" \
+              '
+              def esc($s): (($s // "") | tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;"));
+              def esc_attr($s): (($s // "") | tostring | gsub("&"; "&amp;") | gsub("\""; "&quot;"));
+              def link_http($u):
+                ($u | tostring) as $url
+                | if ($url | test("^https?://")) then
+                    "<a href=\"" + esc_attr($url) + "\">" + esc($url) + "</a>"
+                  else
+                    esc($url)
+                  end;
+              def reason($p): ($p.skipped_reason // $p.reason // ($p.meta // {}).reason // ($p.meta // {}).skipped_reason);
+              def status($p):
+                if ($p.updated == true) then "成功"
+                elif (reason($p)) then "スキップ"
+                elif ($p.updated == false) then "失敗"
+                else "不明" end;
+              def pick($name; $label):
+                ( first(.platforms[]? | select(.name==$name)) // {} ) as $p
+                | {
+                    label:  $label,
+                    sym: (
+                      if    ($p.coherence.matched == null)  then "--"
+                      elif  ($p.coherence.matched == true)  then "✅"
+                      elif  ($p.coherence.matched == false) then "❌"
+                      else "--"
+                      end
+                    ),
+                    url:    ( $p.episode_url // "" ),
+                    reason: ( reason($p) // "" ),
+                    status: ( status($p) )
+                  };
+              def format_reason($r):
+                if (($r | length) == 0) then esc("—")
+                elif ($r | test("^https?://\\S+$")) then link_http($r)
+                else
+                  (esc($r) | gsub("(?<e>[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})"; "<a href=\"mailto:\(.e)\">\(.e)</a>"))
+                end;
+              def plat_div($row):
+                "<div style=\"margin:12px 0;padding:12px;border-left:3px solid #ddd;background:#fafafa\">" +
+                "<strong>◯ " + esc($row.label) + "</strong>" +
+                "<p style=\"margin:8px 0 0 0;font-size:14px\">" +
+                "整合性チェック：" + esc($row.sym) + "<br>" +
+                "更新結果：" + esc($row.status) + "<br>" +
+                "URL：" + (if ($row.url | length) > 0 then link_http($row.url) else esc("（未取得）") end) + "<br>" +
+                "取得ログ：" + format_reason($row.reason) +
+                "</p></div>";
+
+              (if $warn == "true" then
+                "<div style=\"color:#92400e;background:#fffbeb;padding:10px 12px;border:1px solid #fcd34d;border-radius:6px;margin-bottom:16px\">※※※新しいエピソードが公開されていない可能性があります※※※</div>"
+              else "" end) as $banner
+              | "<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"UTF-8\"></head><body style=\"font-family:sans-serif;line-height:1.6;color:#111\">" +
+                $banner +
+                "<p>エピソードURL取り込みを実行しました。</p>" +
+                "<p>実行日時：" + esc($jst) + "<br>" +
+                "対象ページ：" + esc($title) + "</p>" +
+                "<p>" + link_http($tgt) + "</p>" +
+                ([ pick("amazon_music"; "Amazon Music"),
+                   pick("youtube";      "YouTube Music"),
+                   pick("itunes";       "Apple Podcasts"),
+                   pick("spotify";      "Spotify")
+                 ] | map(plat_div(.)) | join("")) +
+                "</body></html>"
+              ' > email_body.html
           fi
 
           {
@@ -214,10 +308,11 @@ jobs:
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
           subject: ${{ steps.emailprep.outputs.subject }}
-          to: y.kumazaki@hlet.jp, hossy@hossy.org, rika@moontracks.net
-          #to: y.kumazaki@hlet.jp
+          #to: y.kumazaki@hlet.jp, hossy@hossy.org, rika@moontracks.net
+          to: y.kumazaki@hlet.jp
           from: ${{ secrets.MAIL_FROM }}
           body: ${{ steps.emailprep.outputs.body }}
+          html_body: file://${{ github.workspace }}/email_body.html
 
       - uses: actions/upload-artifact@v4
         with:
