@@ -63,9 +63,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          # result.json が無い / 壊れている場合は誤通知になりやすいのでメール送信を止める
+          if [ ! -s result.json ]; then
+            echo "should_send_email=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! jq . result.json >/dev/null 2>&1; then
+            echo "should_send_email=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Read result.json (fallback to {})
-          if [ -f result.json ]; then RES=$(cat result.json); else RES="{}"; fi
-          if ! echo "$RES" | jq . >/dev/null 2>&1; then RES="{}"; fi
+          RES=$(cat result.json)
           SKIPPED_ALL=$(echo "$RES" | jq -r 'if .skipped_all == null then "false" else .skipped_all end')
           NOTIFY_ON_SKIP_ALL=$(echo "$RES" | jq -r 'if .notify_on_skip_all == null then "true" else .notify_on_skip_all end')
           WARN_NO_NEW=$(echo "$RES" | jq -r '.warn_no_new_episode // false')
