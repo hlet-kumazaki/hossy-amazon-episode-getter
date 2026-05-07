@@ -152,6 +152,7 @@ jobs:
                   (reason($p) // "") as $r
                   | ($r == "already_has_value"
                      or $r == "coherence_mismatch"
+                     or $r == "coherence_unverified"
                      or $r == "no_new_episode");
     
                 # エラー扱い（updated=false かつ スキップ理由ではない）
