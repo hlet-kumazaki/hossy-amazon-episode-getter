@@ -650,28 +650,29 @@ async function main() {
     const finalSpotify = pickExistingUrl(fieldsAfter, META_KEY_SPOTIFY);
 
     // "after" 補正: ACF から再取得した値を正として使う。
-    // metaResult.updated は「このスクリプトが保存した」ことを示すが、
-    // 初回 fields:{} 返却（WP 側キャッシュ等）で existing* が空に見えた場合も
-    // ACF に URL が存在することがある。final* が valid なら常に反映する。
-    if (needAmazon && isValidUrl(finalAmazon)) {
+    // ただしコヒーレンス失敗（coherence_mismatch / coherence_unverified）のときは
+    // 保存自体を行っていないため、ACF に古い URL が残っていても補正してはいけない。
+    const COHERENCE_FAIL_REASONS = new Set(['coherence_mismatch', 'coherence_unverified']);
+
+    if (needAmazon && isValidUrl(finalAmazon) && !COHERENCE_FAIL_REASONS.has(amazonMetaResult.reason)) {
       amazonPlatform.episode_url = finalAmazon;
       amazonPlatform.updated = true;
       amazonPlatform.skipped_reason = null;
     }
 
-    if (needYouTube && isValidUrl(finalYouTube)) {
+    if (needYouTube && isValidUrl(finalYouTube) && !COHERENCE_FAIL_REASONS.has(ytMetaResult.reason)) {
       ytPlatform.episode_url = finalYouTube;
       ytPlatform.updated = true;
       ytPlatform.skipped_reason = null;
     }
 
-    if (needItunes && isValidUrl(finalItunes)) {
+    if (needItunes && isValidUrl(finalItunes) && !COHERENCE_FAIL_REASONS.has(itMetaResult.reason)) {
       itPlatform.episode_url = finalItunes;
       itPlatform.updated = true;
       itPlatform.skipped_reason = null;
     }
 
-    if (needSpotify && isValidUrl(finalSpotify)) {
+    if (needSpotify && isValidUrl(finalSpotify) && !COHERENCE_FAIL_REASONS.has(spMetaResult.reason)) {
       spPlatform.episode_url = finalSpotify;
       spPlatform.updated = true;
       spPlatform.skipped_reason = null;
