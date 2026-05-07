@@ -319,9 +319,11 @@ async function fetchYouTubeLatest() {
     return { url: null, title: null, episodeNum: null, error: 'no_entry' };
   }
   const entry = entryMatch[0];
-  const linkMatch = entry.match(
-    /<link[^>]*href=\"([^\"]+)\"[^>]*rel=\"alternate\"/i
-  );
+  // YouTube Atom フィードは <link rel="alternate" href="..."/> の順（rel が先）のため
+  // 両方の属性順に対応する
+  const linkMatch =
+    entry.match(/<link[^>]*rel="alternate"[^>]*href="([^"]+)"/i) ||
+    entry.match(/<link[^>]*href="([^"]+)"[^>]*rel="alternate"/i);
   const titleMatch = entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
 
   const url = linkMatch ? linkMatch[1] : null;
@@ -647,25 +649,29 @@ async function main() {
     const finalItunes = pickExistingUrl(fieldsAfter, META_KEY_ITUNES);
     const finalSpotify = pickExistingUrl(fieldsAfter, META_KEY_SPOTIFY);
 
-    if (needAmazon && amazonMetaResult.updated && isValidUrl(finalAmazon)) {
+    // "after" 補正: ACF から再取得した値を正として使う。
+    // metaResult.updated は「このスクリプトが保存した」ことを示すが、
+    // 初回 fields:{} 返却（WP 側キャッシュ等）で existing* が空に見えた場合も
+    // ACF に URL が存在することがある。final* が valid なら常に反映する。
+    if (needAmazon && isValidUrl(finalAmazon)) {
       amazonPlatform.episode_url = finalAmazon;
       amazonPlatform.updated = true;
       amazonPlatform.skipped_reason = null;
     }
 
-    if (needYouTube && ytMetaResult.updated && isValidUrl(finalYouTube)) {
+    if (needYouTube && isValidUrl(finalYouTube)) {
       ytPlatform.episode_url = finalYouTube;
       ytPlatform.updated = true;
       ytPlatform.skipped_reason = null;
     }
 
-    if (needItunes && itMetaResult.updated && isValidUrl(finalItunes)) {
+    if (needItunes && isValidUrl(finalItunes)) {
       itPlatform.episode_url = finalItunes;
       itPlatform.updated = true;
       itPlatform.skipped_reason = null;
     }
 
-    if (needSpotify && spMetaResult.updated && isValidUrl(finalSpotify)) {
+    if (needSpotify && isValidUrl(finalSpotify)) {
       spPlatform.episode_url = finalSpotify;
       spPlatform.updated = true;
       spPlatform.skipped_reason = null;
