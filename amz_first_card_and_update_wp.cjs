@@ -26,7 +26,7 @@ const META_KEY_YOUTUBE  = 'youtube_podcast';      // ACF フィールド名 (met
 const FIELD_KEY_YOUTUBE = 'field_680bf82a6b5c0';  // ACF field_key
 // Apple Podcasts
 const ITUNES_LOOKUP_URL =
-  'https://itunes.apple.com/lookup?id=1810690058&entity=podcastEpisode';
+  'https://itunes.apple.com/lookup?id=1810690058&entity=podcastEpisode&country=jp';
 const META_KEY_ITUNES  = 'apple_podcast';         // ACF フィールド名 (meta_key)
 const FIELD_KEY_ITUNES = 'field_680bf86a6b5c2';   // ACF field_key
 // Spotify
@@ -58,6 +58,36 @@ async function getJson(url) {
     throw new Error(`GET ${url} failed: ${res.status}`);
   }
   return res.json();
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 初回 latest が fields:{} を返すことがあるため、空ならリトライして既存 ACF を確実に読む
+async function fetchLatestPost() {
+  const maxAttempts = 3;
+  let latest = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    latest = await getJson(
+      `${LATEST_ENDPOINT}?t=${Date.now().toString()}&phase=before&attempt=${attempt}`
+    );
+    const fields = latest.fields || {};
+    if (Object.keys(fields).length > 0 || attempt === maxAttempts - 1) {
+      return latest;
+    }
+    await sleep(1500);
+  }
+
+  return latest;
+}
+
+async function fetchCurrentFieldUrl(metaKey) {
+  const snap = await getJson(
+    `${LATEST_ENDPOINT}?t=${Date.now().toString()}&phase=precheck&field=${metaKey}`
+  );
+  return pickExistingUrl(snap.fields || {}, metaKey);
 }
 
 function pickUpdatedFromMeta(obj) {
@@ -169,12 +199,21 @@ function computeMatched(need, expected, actual) {
 }
 
 // 共通化: fetch → 整合性チェック → 保存
-async function fetchAndUpdatePlatform({ need, existingUrl, fetchLatest, fieldKey, expectedEpisode }) {
+async function fetchAndUpdatePlatform({
+  need,
+  existingUrl,
+  fetchLatest,
+  fieldKey,
+  metaKey,
+  expectedEpisode,
+}) {
   let data = { url: existingUrl, title: null, episodeNum: null, error: null };
   let metaResult = {
     updated: false,
     skipped: !need,
     reason: need ? null : 'already_has_value',
+    postMetaInvoked: false,
+    acfUrlBeforeSave: null,
   };
 
   if (need) {
@@ -191,6 +230,10 @@ async function fetchAndUpdatePlatform({ need, existingUrl, fetchLatest, fieldKey
       metaResult.updated = false;
       metaResult.skipped = true;
       metaResult.reason = 'coherence_mismatch';
+      // 整合性 NG 時点で ACF に値があれば、初回 fields:{} 誤判定か過去の誤保存の疑い
+      if (metaKey) {
+        metaResult.acfUrlBeforeSave = await fetchCurrentFieldUrl(metaKey);
+      }
     } else if (
       expectedEpisode != null &&
       data.episodeNum == null &&
@@ -200,13 +243,32 @@ async function fetchAndUpdatePlatform({ need, existingUrl, fetchLatest, fieldKey
       metaResult.updated = false;
       metaResult.skipped = true;
       metaResult.reason = 'coherence_unverified';
+      if (metaKey) {
+        metaResult.acfUrlBeforeSave = await fetchCurrentFieldUrl(metaKey);
+      }
     } else if (data.url && fieldKey) {
-      metaResult = await postMeta({
-        field: fieldKey,
-        value: data.url,
-        isAcf: true,
-        skipIfExists: false,
-      });
+      // 保存直前に ACF を再確認（初回 fields:{} で need=true になった誤判定を防ぐ）
+      const acfUrlNow = metaKey ? await fetchCurrentFieldUrl(metaKey) : '';
+      metaResult.acfUrlBeforeSave = acfUrlNow || null;
+
+      if (isValidUrl(acfUrlNow)) {
+        metaResult.updated = false;
+        metaResult.skipped = true;
+        metaResult.reason = 'already_has_value';
+      } else {
+        metaResult.postMetaInvoked = true;
+        metaResult = {
+          ...metaResult,
+          ...(await postMeta({
+            field: fieldKey,
+            value: data.url,
+            isAcf: true,
+            skipIfExists: false,
+          })),
+          postMetaInvoked: true,
+          acfUrlBeforeSave: acfUrlNow || null,
+        };
+      }
     } else if (data.error) {
       metaResult.reason = data.error;
     }
@@ -335,7 +397,14 @@ async function fetchYouTubeLatest() {
 }
 
 async function fetchItunesLatest() {
-  const res = await fetch(ITUNES_LOOKUP_URL);
+  // Apple Lookup API は Akamai CDN で max-age=86400（24時間）キャッシュされる。
+  // Cache-Control: no-cache を付けることで CDN にオリジンへの再取得を強制する。
+  const res = await fetch(ITUNES_LOOKUP_URL, {
+    headers: {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    },
+  });
   if (!res.ok) {
     return {
       url: null,
@@ -398,10 +467,8 @@ async function main() {
   let context = null;
 
   try {
-    // 1) 最新投稿 & 既存フィールド取得
-    const latest = await getJson(
-      `${LATEST_ENDPOINT}?t=${Date.now().toString()}`
-    );
+    // 1) 最新投稿 & 既存フィールド取得（空返却時はリトライ）
+    const latest = await fetchLatestPost();
     if (!latest.ok) throw new Error('latest endpoint error');
 
     const postId = latest.post_id;
@@ -493,6 +560,7 @@ async function main() {
         existingUrl: existingAmazon,
         fetchLatest: () => fetchAmazonLatest(context),
         fieldKey: FIELD_KEY_AMAZON,
+        metaKey: META_KEY_AMAZON,
         expectedEpisode,
       });
       amazonData = r.data;
@@ -535,6 +603,7 @@ async function main() {
         existingUrl: existingYouTube,
         fetchLatest: () => fetchYouTubeLatest(),
         fieldKey: FIELD_KEY_YOUTUBE,
+        metaKey: META_KEY_YOUTUBE,
         expectedEpisode,
       });
       ytData = r.data;
@@ -573,6 +642,7 @@ async function main() {
         existingUrl: existingItunes,
         fetchLatest: () => fetchItunesLatest(),
         fieldKey: FIELD_KEY_ITUNES,
+        metaKey: META_KEY_ITUNES,
         expectedEpisode,
       });
       itData = r.data;
@@ -611,6 +681,7 @@ async function main() {
         existingUrl: existingSpotify,
         fetchLatest: () => fetchSpotifyLatest(context),
         fieldKey: FIELD_KEY_SPOTIFY,
+        metaKey: META_KEY_SPOTIFY,
         expectedEpisode,
       });
       spData = r.data;
@@ -654,25 +725,46 @@ async function main() {
     // 保存自体を行っていないため、ACF に古い URL が残っていても補正してはいけない。
     const COHERENCE_FAIL_REASONS = new Set(['coherence_mismatch', 'coherence_unverified']);
 
-    if (needAmazon && isValidUrl(finalAmazon) && !COHERENCE_FAIL_REASONS.has(amazonMetaResult.reason)) {
+    // after 補正は postMeta を実際に呼んだ PF のみ（coherence 失敗時は補正しない）
+    if (
+      needAmazon &&
+      amazonMetaResult.postMetaInvoked &&
+      isValidUrl(finalAmazon) &&
+      !COHERENCE_FAIL_REASONS.has(amazonMetaResult.reason)
+    ) {
       amazonPlatform.episode_url = finalAmazon;
       amazonPlatform.updated = true;
       amazonPlatform.skipped_reason = null;
     }
 
-    if (needYouTube && isValidUrl(finalYouTube) && !COHERENCE_FAIL_REASONS.has(ytMetaResult.reason)) {
+    if (
+      needYouTube &&
+      ytMetaResult.postMetaInvoked &&
+      isValidUrl(finalYouTube) &&
+      !COHERENCE_FAIL_REASONS.has(ytMetaResult.reason)
+    ) {
       ytPlatform.episode_url = finalYouTube;
       ytPlatform.updated = true;
       ytPlatform.skipped_reason = null;
     }
 
-    if (needItunes && isValidUrl(finalItunes) && !COHERENCE_FAIL_REASONS.has(itMetaResult.reason)) {
+    if (
+      needItunes &&
+      itMetaResult.postMetaInvoked &&
+      isValidUrl(finalItunes) &&
+      !COHERENCE_FAIL_REASONS.has(itMetaResult.reason)
+    ) {
       itPlatform.episode_url = finalItunes;
       itPlatform.updated = true;
       itPlatform.skipped_reason = null;
     }
 
-    if (needSpotify && isValidUrl(finalSpotify) && !COHERENCE_FAIL_REASONS.has(spMetaResult.reason)) {
+    if (
+      needSpotify &&
+      spMetaResult.postMetaInvoked &&
+      isValidUrl(finalSpotify) &&
+      !COHERENCE_FAIL_REASONS.has(spMetaResult.reason)
+    ) {
       spPlatform.episode_url = finalSpotify;
       spPlatform.updated = true;
       spPlatform.skipped_reason = null;
@@ -714,6 +806,24 @@ async function main() {
         finalYouTube,
         finalItunes,
         finalSpotify,
+        acfAudit: {
+          amazon: {
+            postMetaInvoked: amazonMetaResult.postMetaInvoked || false,
+            acfUrlBeforeSave: amazonMetaResult.acfUrlBeforeSave || null,
+          },
+          youtube: {
+            postMetaInvoked: ytMetaResult.postMetaInvoked || false,
+            acfUrlBeforeSave: ytMetaResult.acfUrlBeforeSave || null,
+          },
+          itunes: {
+            postMetaInvoked: itMetaResult.postMetaInvoked || false,
+            acfUrlBeforeSave: itMetaResult.acfUrlBeforeSave || null,
+          },
+          spotify: {
+            postMetaInvoked: spMetaResult.postMetaInvoked || false,
+            acfUrlBeforeSave: spMetaResult.acfUrlBeforeSave || null,
+          },
+        },
         publishDateGmt,
         publishDateLocal,
         publishUtcMs,
