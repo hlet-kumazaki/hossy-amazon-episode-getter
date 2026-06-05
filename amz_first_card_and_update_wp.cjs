@@ -278,7 +278,7 @@ async function fetchAndUpdatePlatform({
           acfUrlBeforeSave: acfUrlNow || null,
         };
         if (metaResult.updated) {
-          console.log(`[${name}] 整合性一致 (期待=${expectedEpisode}, 取得=${data.episodeNum}) → 保存: ${data.url}`);
+          console.error(`[${name}] 整合性一致 (期待=${expectedEpisode}, 取得=${data.episodeNum}) → 保存: ${data.url}`);
         }
       }
     } else if (data.error) {
