@@ -208,6 +208,7 @@ function computeMatched(need, expected, actual) {
 
 // 共通化: fetch → 整合性チェック → 保存
 async function fetchAndUpdatePlatform({
+  name,
   need,
   existingUrl,
   fetchLatest,
@@ -276,6 +277,9 @@ async function fetchAndUpdatePlatform({
           postMetaInvoked: true,
           acfUrlBeforeSave: acfUrlNow || null,
         };
+        if (metaResult.updated) {
+          console.log(`[${name}] 整合性一致 (期待=${expectedEpisode}, 取得=${data.episodeNum}) → 保存: ${data.url}`);
+        }
       }
     } else if (data.error) {
       metaResult.reason = data.error;
@@ -564,6 +568,7 @@ async function main() {
     let amazonMatched;
     {
       const r = await fetchAndUpdatePlatform({
+        name: 'AMZ',
         need: needAmazon,
         existingUrl: existingAmazon,
         fetchLatest: () => fetchAmazonLatest(context),
@@ -607,6 +612,7 @@ async function main() {
     let ytMatched;
     {
       const r = await fetchAndUpdatePlatform({
+        name: 'YT',
         need: needYouTube,
         existingUrl: existingYouTube,
         fetchLatest: () => fetchYouTubeLatest(),
@@ -646,6 +652,7 @@ async function main() {
     let itMatched;
     {
       const r = await fetchAndUpdatePlatform({
+        name: 'APPLE',
         need: needItunes,
         existingUrl: existingItunes,
         fetchLatest: () => fetchItunesLatest(),
@@ -685,6 +692,7 @@ async function main() {
     let spMatched;
     {
       const r = await fetchAndUpdatePlatform({
+        name: 'SPOTIFY',
         need: needSpotify,
         existingUrl: existingSpotify,
         fetchLatest: () => fetchSpotifyLatest(context),
