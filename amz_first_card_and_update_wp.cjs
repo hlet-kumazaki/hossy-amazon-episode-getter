@@ -128,7 +128,7 @@ function pickReasonFromMeta(obj) {
   );
 }
 
-async function postMeta({ field, value, isAcf = true, skipIfExists = true }) {
+async function postMeta({ field, value, isAcf = true, skipIfExists = true, retries = 3, retryDelay = 4000 }) {
   const body = {
     field,
     value,
@@ -136,17 +136,40 @@ async function postMeta({ field, value, isAcf = true, skipIfExists = true }) {
     skip_if_exists: !!skipIfExists,
   };
 
-  const res = await fetch(META_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      Accept: 'application/json',
-      Authorization: basicAuthHeader(),
-    },
-    body: JSON.stringify(body),
-  });
+  let res, text;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      res = await fetch(META_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          Accept: 'application/json',
+          Authorization: basicAuthHeader(),
+        },
+        body: JSON.stringify(body),
+      });
+      text = await res.text();
 
-  const text = await res.text();
+      // 429はHTMLで返ってくるのでステータスで判定
+      if (res.status === 429 && attempt < retries) {
+        const wait = retryDelay * attempt;
+        console.warn(`[WARN] postMeta 429 (attempt ${attempt}/${retries}). Retrying in ${wait}ms...`);
+        await sleep(wait);
+        continue;
+      }
+      break;
+    } catch (err) {
+      const isNetworkError = err instanceof TypeError || err?.cause?.code === 'UND_ERR_SOCKET';
+      if (isNetworkError && attempt < retries) {
+        const wait = retryDelay * attempt;
+        console.warn(`[WARN] postMeta network error (attempt ${attempt}/${retries}): ${err.message}. Retrying in ${wait}ms...`);
+        await sleep(wait);
+        continue;
+      }
+      throw err;
+    }
+  }
+
   let json;
   try {
     json = JSON.parse(text);
@@ -754,10 +777,11 @@ async function main() {
     // 保存自体を行っていないため、ACF に古い URL が残っていても補正してはいけない。
     const COHERENCE_FAIL_REASONS = new Set(['coherence_mismatch', 'coherence_unverified']);
 
-    // after 補正は postMeta を実際に呼んだ PF のみ（coherence 失敗時は補正しない）
+    // after 補正は postMeta を実際に呼んだ PF のみ（coherence 失敗・postMeta 失敗時は補正しない）
     if (
       needAmazon &&
       amazonMetaResult.postMetaInvoked &&
+      amazonMetaResult.ok !== false &&
       isValidUrl(finalAmazon) &&
       !COHERENCE_FAIL_REASONS.has(amazonMetaResult.reason)
     ) {
@@ -769,6 +793,7 @@ async function main() {
     if (
       needYouTube &&
       ytMetaResult.postMetaInvoked &&
+      ytMetaResult.ok !== false &&
       isValidUrl(finalYouTube) &&
       !COHERENCE_FAIL_REASONS.has(ytMetaResult.reason)
     ) {
@@ -780,6 +805,7 @@ async function main() {
     if (
       needItunes &&
       itMetaResult.postMetaInvoked &&
+      itMetaResult.ok !== false &&
       isValidUrl(finalItunes) &&
       !COHERENCE_FAIL_REASONS.has(itMetaResult.reason)
     ) {
@@ -791,6 +817,7 @@ async function main() {
     if (
       needSpotify &&
       spMetaResult.postMetaInvoked &&
+      spMetaResult.ok !== false &&
       isValidUrl(finalSpotify) &&
       !COHERENCE_FAIL_REASONS.has(spMetaResult.reason)
     ) {
