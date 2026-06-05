@@ -260,7 +260,8 @@ async function fetchAndUpdatePlatform({
       const acfUrlNow = metaKey ? await fetchCurrentFieldUrl(metaKey) : '';
       metaResult.acfUrlBeforeSave = acfUrlNow || null;
 
-      if (isValidUrl(acfUrlNow)) {
+      if (isValidUrl(acfUrlNow) && acfUrlNow === data.url) {
+        // 同じURLがすでに保存済み → スキップ（誤判定防止の本来の目的）
         metaResult.updated = false;
         metaResult.skipped = true;
         metaResult.reason = 'already_has_value';
