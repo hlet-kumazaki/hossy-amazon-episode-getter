@@ -48,23 +48,35 @@ function basicAuthHeader() {
   return 'Basic ' + token;
 }
 
-async function getJson(url, { retries = 3, retryDelay = 3000 } = {}) {
+async function getJson(url, { retries = 3, retryDelay = 4000 } = {}) {
   for (let attempt = 1; attempt <= retries; attempt++) {
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-      },
-    });
-    if (res.status === 429 && attempt < retries) {
-      const wait = retryDelay * attempt;
-      console.warn(`[WARN] 429 Too Many Requests (attempt ${attempt}/${retries}). Retrying in ${wait}ms...`);
-      await sleep(wait);
-      continue;
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+      if (res.status === 429 && attempt < retries) {
+        const wait = retryDelay * attempt;
+        console.warn(`[WARN] 429 Too Many Requests (attempt ${attempt}/${retries}). Retrying in ${wait}ms...`);
+        await sleep(wait);
+        continue;
+      }
+      if (!res.ok) {
+        throw new Error(`GET ${url} failed: ${res.status}`);
+      }
+      return res.json();
+    } catch (err) {
+      // ソケット切断・ネットワークエラー時もリトライ
+      const isNetworkError = err instanceof TypeError || err?.cause?.code === 'UND_ERR_SOCKET';
+      if (isNetworkError && attempt < retries) {
+        const wait = retryDelay * attempt;
+        console.warn(`[WARN] Network error (attempt ${attempt}/${retries}): ${err.message}. Retrying in ${wait}ms...`);
+        await sleep(wait);
+        continue;
+      }
+      throw err;
     }
-    if (!res.ok) {
-      throw new Error(`GET ${url} failed: ${res.status}`);
-    }
-    return res.json();
   }
 }
 
