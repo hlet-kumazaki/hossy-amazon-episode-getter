@@ -128,12 +128,13 @@ function pickReasonFromMeta(obj) {
   );
 }
 
-async function postMeta({ field, value, isAcf = true, skipIfExists = true, retries = 3, retryDelay = 4000 }) {
+async function postMeta({ field, value, isAcf = true, skipIfExists = true, alsoUpdateFeeds = false, retries = 3, retryDelay = 4000 }) {
   const body = {
     field,
     value,
     is_acf: !!isAcf,
     skip_if_exists: !!skipIfExists,
+    also_update_feeds: !!alsoUpdateFeeds,
   };
 
   let res, text;
@@ -309,6 +310,7 @@ async function fetchAndUpdatePlatform({
             value: data.url,
             isAcf: true,
             skipIfExists: false,
+            alsoUpdateFeeds: false,
           })),
           postMetaInvoked: true,
           acfUrlBeforeSave: acfUrlNow || null,
