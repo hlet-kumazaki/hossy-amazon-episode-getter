@@ -327,9 +327,13 @@ jobs:
           html_body: file://${{ github.workspace }}/email_body.html
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: result
-          path: result.json
+          path: |
+            result.json
+            amz_no_episode_item.png
+          if-no-files-found: ignore
 
     concurrency:
       group: amz-wp-update

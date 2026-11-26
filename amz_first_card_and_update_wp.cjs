@@ -352,12 +352,35 @@ async function fetchAmazonLatest(context) {
     console.error('[AMZ] goto url =', AMAZON_CHANNEL_URL);
     console.error('[AMZ] final url =', page.url());
 
-    // 旧コード同様、エピソード要素の出現を明示的に待つ
+    // 旧コード同様、エピソード要素の出現を明示的に待つ。
+    // Amazon 側はエピソード一覧が描画されないまま止まることがある（2026-11-27 は
+    // 06:00〜08:17 の実行がすべてこれで、08:21 の実行だけ取れた）ので、
+    // 出てこなければ再読み込みしてやり直す。
     const selector = 'music-episode-row-item';
-    try {
-      await page.waitForSelector(selector, { timeout: 60000 });
-    } catch (e) {
-      // セレクタが一定時間出てこなかった場合はここで終了
+    const AMZ_ATTEMPTS = 3;
+    let found = false;
+    for (let attempt = 1; attempt <= AMZ_ATTEMPTS; attempt++) {
+      try {
+        await page.waitForSelector(selector, { timeout: 30000 });
+        found = true;
+        break;
+      } catch (e) {
+        const bodyText = await page
+          .evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 200))
+          .catch(() => '');
+        console.error(
+          `[AMZ] エピソード一覧が出ない (試行 ${attempt}/${AMZ_ATTEMPTS}) title="${await page.title().catch(() => '')}" body="${bodyText}"`
+        );
+        if (attempt === AMZ_ATTEMPTS) {
+          await page.screenshot({ path: 'amz_no_episode_item.png', fullPage: true }).catch(() => {});
+          break;
+        }
+        await sleep(5000 * attempt);
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
+      }
+    }
+    if (!found) {
       return { url: null, title: null, episodeNum: null, error: 'no_episode_item' };
     }
 
