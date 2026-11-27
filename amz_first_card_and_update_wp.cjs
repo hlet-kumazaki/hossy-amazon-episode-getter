@@ -27,6 +27,8 @@ const FIELD_KEY_YOUTUBE = 'field_680bf82a6b5c0';  // ACF field_key
 // Apple Podcasts
 const ITUNES_LOOKUP_URL =
   'https://itunes.apple.com/lookup?id=1810690058&entity=podcastEpisode&country=jp';
+const ITUNES_SHOW_ID = '1810690058';
+const ITUNES_CHANNEL_URL = `https://podcasts.apple.com/jp/podcast/id${ITUNES_SHOW_ID}`;
 const META_KEY_ITUNES  = 'apple_podcast';         // ACF フィールド名 (meta_key)
 const FIELD_KEY_ITUNES = 'field_680bf86a6b5c2';   // ACF field_key
 // Spotify
@@ -454,7 +456,7 @@ async function fetchYouTubeLatest() {
   return { url, title, episodeNum, error: null };
 }
 
-async function fetchItunesLatest() {
+async function fetchItunesFromApi() {
   // Apple Lookup API は Akamai CDN で max-age=86400（24時間）キャッシュされる。
   // Cache-Control: no-cache を付けることで CDN にオリジンへの再取得を強制する。
   const res = await fetch(ITUNES_LOOKUP_URL, {
@@ -481,6 +483,81 @@ async function fetchItunesLatest() {
   const title = ep.trackName || ep.collectionName || null;
   const episodeNum = episodeNumFromTitle(title) ?? episodeNumFromUrl(url);
   return { url, title, episodeNum, error: null };
+}
+
+// Apple Podcasts のチャンネルページに埋め込まれた JSON（serialized-server-data）から最新回を読む。
+// 2026-11-27 は、チャンネルページに Ep83 が出たあとも Lookup API が 08:21 まで Ep82 を返していた。
+async function fetchItunesFromChannelPage() {
+  try {
+    const res = await fetch(ITUNES_CHANNEL_URL, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+        'Accept-Language': 'ja-JP,ja;q=0.9',
+      },
+      redirect: 'follow',
+    });
+    if (!res.ok) {
+      return { url: null, title: null, episodeNum: null, error: `page_http_${res.status}` };
+    }
+    const html = await res.text();
+    const m = html.match(
+      /<script type="application\/json" id="serialized-server-data">([\s\S]*?)<\/script>/
+    );
+    if (!m) {
+      return { url: null, title: null, episodeNum: null, error: 'page_no_data' };
+    }
+    const data = JSON.parse(m[1]);
+
+    // storeUrl（エピソードURL）と title を持つエピソード情報を集める
+    const episodes = new Map();
+    const walk = o => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (!o || typeof o !== 'object') return;
+      if (
+        typeof o.storeUrl === 'string' &&
+        o.storeUrl.includes(`id${ITUNES_SHOW_ID}?i=`) &&
+        typeof o.title === 'string'
+      ) {
+        episodes.set(o.storeUrl, {
+          url: o.storeUrl,
+          title: o.title,
+          releaseDate: o.releaseDate || '',
+          episodeNum: episodeNumFromTitle(o.title) ?? episodeNumFromUrl(o.storeUrl),
+        });
+      }
+      Object.values(o).forEach(walk);
+    };
+    walk(data);
+
+    const latest = [...episodes.values()].sort((a, b) =>
+      (b.releaseDate || '').localeCompare(a.releaseDate || '')
+    )[0];
+    if (!latest) {
+      return { url: null, title: null, episodeNum: null, error: 'page_no_episode' };
+    }
+    return { url: latest.url, title: latest.title, episodeNum: latest.episodeNum, error: null };
+  } catch (e) {
+    return { url: null, title: null, episodeNum: null, error: 'page_error' };
+  }
+}
+
+async function fetchItunesLatest(expectedEpisode) {
+  const api = await fetchItunesFromApi();
+  if (expectedEpisode != null && api.episodeNum === expectedEpisode) {
+    return { ...api, source: 'api' };
+  }
+  // API が対象回を返さないときは、チャンネルページも見る
+  const page = await fetchItunesFromChannelPage();
+  console.error(
+    `[APPLE] API=${api.episodeNum ?? api.error} / チャンネルページ=${page.episodeNum ?? page.error} (期待=${expectedEpisode})`
+  );
+  if (expectedEpisode != null && page.episodeNum === expectedEpisode) {
+    return { ...page, source: 'channel_page' };
+  }
+  // どちらも対象回でなければ、API の結果をそのまま返す（API が失敗していればページの結果）
+  if (api.url || !page.url) return { ...api, source: 'api' };
+  return { ...page, source: 'channel_page' };
 }
 
 async function fetchSpotifyLatest(context) {
@@ -701,7 +778,7 @@ async function main() {
         name: 'APPLE',
         need: needItunes,
         existingUrl: existingItunes,
-        fetchLatest: () => fetchItunesLatest(),
+        fetchLatest: () => fetchItunesLatest(expectedEpisode),
         fieldKey: FIELD_KEY_ITUNES,
         metaKey: META_KEY_ITUNES,
         expectedEpisode,
